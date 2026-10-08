@@ -8,10 +8,13 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #pragma once
 
 #include <cstdint>
+#include <iomanip>
 #include <cmath>
 #include <atomic>
 
 #include <gmp.h>
+
+#include "transformGMP.h"
 
 class annie
 {
@@ -26,6 +29,7 @@ public:
 	virtual ~annie() {}
 
 private:
+	transform * _transform = nullptr;
 	std::atomic_bool _quit = false;
 
 protected:
@@ -60,24 +64,58 @@ private:
 		// pio::print(ss.str());
 	// }
 
+	static std::string uint64_to_string(const uint64_t u)
+	{
+		std::stringstream ss; ss << std::uppercase << std::hex << std::setfill('0') << std::setw(16) << u;
+		return ss.str();
+	}
+
+	static constexpr int ilog2_32(const uint32_t n) { return (n == 0) ? -1 : (31 - __builtin_clz(n)); }
+
+	static int B_GerbiczLi(const size_t size)
+	{
+		const size_t L = (size_t(2) << (ilog2_32(uint32_t(size)) / 2));
+		return int((size - 1) / L) + 1;
+	}
+
 public:
 	EReturn check(const mpz_t & n, const std::string & expression)
 	{
-		long a = 2;
-		while (mpz_si_kronecker(a, n) != -1) { ++a; const long s = std::lround(std::sqrt(double(a))); if (s * s == a) ++a; }
+		int32_t a = 2;
+		while (mpz_si_kronecker(a, n) != -1) { ++a; const int32_t s = std::lround(std::sqrt(double(a))); if (s * s == a) ++a; }
 
-		mpz_t base, exponent, res;
-		mpz_inits(base, exponent, res, nullptr);
-		mpz_set_si(base, a);
+		transform * const p_transform = new transformGMP(n);
+		_transform = p_transform;
+
+		mpz_t exponent; mpz_init(exponent);
 		mpz_set(exponent, n); mpz_sub_ui(exponent, exponent, 1); mpz_fdiv_q_2exp(exponent, exponent, 1);
-		mpz_powm(res, base, exponent, n);
-		mpz_set(base, n); mpz_sub_ui(base, base, 1);
-		const bool is_prp = (mpz_cmp(res, base) == 0);
-		mpz_clears(base, exponent, res, nullptr);
+
+		p_transform->set(1);
+
+		const int i0 = int(mpz_sizeinbase(exponent, 2)) - 1;
+		for (int i = i0; i >= 0; --i)
+		{
+			if (quitting()) return EReturn::Aborted;
+
+			p_transform->square_mul((mpz_tstbit(exponent, mp_bitcnt_t(i)) != 0) ? a : 1);
+		}
+
+		const bool is_prp = p_transform->is_minus_one();
+
+		p_transform->square_mul(1);
+		p_transform->get_res64();
+		const uint64_t res64 = p_transform->get_res64();
+
+		mpz_clear(exponent);
 
 		const char * const ns = (expression.size() <= 40) ? expression.c_str() : "input";
-		const char * const status = is_prp ? "a probable prime" : "composite";
-		std::cout << ns << " is " << status << ", a = " << a << "." << std::endl;
+		std::cout << ns << " is ";
+		if (is_prp) std::cout << "a probable prime";
+		else std::cout << "composite, res64 = " << uint64_to_string(res64);
+		std::cout << ", a = " << a << "." << std::endl;
+
+		delete _transform;
+		_transform = nullptr;
 
 		return EReturn::Success;
 	}
