@@ -16,14 +16,24 @@ Please give feedback to the authors if improvement is realized. It is distribute
 class transformGMP : public transform
 {
 private:
-	static const size_t reg_count = 1;
-	mpz_t _mod;
+	static const size_t reg_count = 3;
+	mpz_t _mod, _regm;
 	mpz_t _reg[reg_count];
 
 public:
 	void set(const uint32_t a) override
 	{
 		mpz_set_ui(_reg[0], a);
+	}
+
+	void get(mpz_t & z, const size_t src) const override
+	{
+		mpz_set(z, _reg[src]);
+	}
+
+	void copy(const size_t dst, const size_t src) override
+	{
+		mpz_set(_reg[dst], _reg[src]);
 	}
 
 	void square_mul(const int32_t a) override
@@ -34,30 +44,28 @@ public:
 		mpz_mod(r, r, _mod);
 	}
 
-	bool is_minus_one() const override
+	void init_multiplicand(const size_t src) override
 	{
-		mpz_t t; mpz_init(t);
-		mpz_add_ui(t, _reg[0], 1); if (mpz_cmp(t, _mod) >= 0) mpz_sub(t, t, _mod);
-		const bool b = (mpz_sgn(t) == 0);
-		mpz_clear(t);
-		return b;
+		mpz_set(_regm, _reg[src]);
 	}
 
-	uint64_t get_res64() const override
+	void mul(const size_t dst) override
 	{
-		return (mpz_size(_reg[0]) != 0) ? uint64_t(mpz_getlimbn(_reg[0], 0)) : uint64_t(0);
+		mpz_t & r = _reg[dst];
+		mpz_mul(r, r, _regm);
+		mpz_mod(r, r, _mod);
 	}
 
 public:
-	transformGMP(const mpz_t & mod)
+	transformGMP(const mpz_t & mod) : transform(mod)
 	{
-		mpz_init_set(_mod, mod);
+		mpz_init_set(_mod, mod); mpz_init(_regm);
 		for (size_t i = 0; i < reg_count; ++i) mpz_init(_reg[i]);
 	}
 
 	virtual ~transformGMP()
 	{
+		mpz_clear(_mod); mpz_clear(_regm);
 		for (size_t i = 0; i < reg_count; ++i) mpz_clear(_reg[i]);
-		mpz_clear(_mod);
 	}
 };

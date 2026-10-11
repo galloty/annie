@@ -90,7 +90,10 @@ public:
 		mpz_t exponent; mpz_init(exponent);
 		mpz_set(exponent, n); mpz_sub_ui(exponent, exponent, 1); mpz_fdiv_q_2exp(exponent, exponent, 1);
 
+		const int B_GL = B_GerbiczLi(mpz_sizeinbase(exponent, 2));
+
 		p_transform->set(1);
+		p_transform->copy(1, 0);	// d(t)
 
 		const int i0 = int(mpz_sizeinbase(exponent, 2)) - 1;
 		for (int i = i0; i >= 0; --i)
@@ -98,25 +101,75 @@ public:
 			if (quitting()) return EReturn::Aborted;
 
 			p_transform->square_mul((mpz_tstbit(exponent, mp_bitcnt_t(i)) != 0) ? a : 1);
+
+			if ((i % B_GL == 0) && (i / B_GL != 0))
+			{
+				p_transform->init_multiplicand(0);
+				p_transform->mul(1);	// d(t)
+			}
 		}
 
-		const bool is_prp = p_transform->is_minus_one();
+		// save result to multiplicand
+		p_transform->init_multiplicand(0);
 
+		const bool is_prp = p_transform->is_minus_one(0);
 		p_transform->square_mul(1);
-		p_transform->get_res64();
-		const uint64_t res64 = p_transform->get_res64();
+		const uint64_t res64 = p_transform->get_res64(0);
 
-		mpz_clear(exponent);
+		// d(t + 1) = d(t) * result
+		p_transform->copy(2, 1);
+		p_transform->mul(2);
 
-		const char * const ns = (expression.size() <= 40) ? expression.c_str() : "input";
-		std::cout << ns << " is ";
-		if (is_prp) std::cout << "a probable prime";
-		else std::cout << "composite, res64 = " << uint64_to_string(res64);
-		std::cout << ", a = " << a << "." << std::endl;
+		mpz_t res; mpz_init_set_ui(res, 0);
+		mpz_t t; mpz_init(t);
+		while (mpz_sgn(exponent) != 0)
+		{
+			mpz_mod_2exp(t, exponent, (unsigned long int)(B_GL));
+			mpz_add(res, res, t);
+			mpz_div_2exp(exponent, exponent, (unsigned long int)(B_GL));
+		}
+		mpz_clear(t); mpz_clear(exponent);
+
+		const int res_size = int(mpz_sizeinbase(res, 2));
+
+		// a^{res - 2^B}
+		p_transform->set(1);
+		for (int i = res_size - 1; i >= B_GL; --i)
+		{
+			if (quitting()) { mpz_clear(res); return EReturn::Aborted; }
+			p_transform->square_mul((mpz_tstbit(res, mp_bitcnt_t(i)) != 0) ? a : 1);
+		}
+
+		// a^{res - 2^B} * d(t)
+		p_transform->init_multiplicand(1);
+		p_transform->mul(0);
+
+		// (a^{res - 2^B} * d(t))^2^B = a^res * d(t)^{2^B}
+		for (int i = B_GL - 1; i >= 0; --i)
+		{
+			if (quitting()) return EReturn::Aborted;
+			p_transform->square_mul(((i < res_size) && (mpz_tstbit(res, mp_bitcnt_t(i)) != 0)) ? a : 1);
+		}
+
+		mpz_clear(res);
+
+		// d(t)^{2^B} * a^res ?= d(t + 1)
+		const uint64_t h1 = p_transform->gethash64(0);
+		const uint64_t h2 = p_transform->gethash64(2);
+		const bool success = (h1 == h2);
+
+		if (success)
+		{
+			const char * const ns = (expression.size() <= 40) ? expression.c_str() : "input";
+			std::cout << ns << " is ";
+			if (is_prp) std::cout << "a probable prime";
+			else std::cout << "composite, res64 = " << uint64_to_string(res64);
+			std::cout << ", a = " << a << "." << std::endl;
+		}
 
 		delete _transform;
 		_transform = nullptr;
 
-		return EReturn::Success;
+		return success ? EReturn::Success : EReturn::Failed;
 	}
 };

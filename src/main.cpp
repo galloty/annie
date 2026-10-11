@@ -148,7 +148,7 @@ public:
 
 		std::cout << header(args) << std::endl;
 
-		std::string expression, filename;
+		std::string expression = "152^(2^11)+1", filename;	// 4397E2484A3A6450
 		size_t device = 0;
 
 		// parse args
