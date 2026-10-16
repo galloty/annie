@@ -8,6 +8,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <iomanip>
 #include <cmath>
 #include <atomic>
@@ -70,6 +71,15 @@ private:
 		return ss.str();
 	}
 
+	static std::string mpz_to_short_string(const mpz_t & n)
+	{
+		const size_t size = mpz_sizeinbase(n, 10);
+		std::string str; str.resize(size + 80);
+		mpz_get_str(str.data(), 10, n);
+		if (size <= 40) return str;
+		return str.substr(0, 8) + "[" + std::to_string(size - 16) + " other digits]" + str.substr(size - 8, 8);
+	}
+
 	static constexpr int ilog2_32(const uint32_t n) { return (n == 0) ? -1 : (31 - __builtin_clz(n)); }
 
 	static int B_GerbiczLi(const size_t size)
@@ -79,12 +89,32 @@ private:
 	}
 
 public:
-	EReturn check(const mpz_t & n, const std::string & expression)
+	EReturn check(const mpz_t & n, const std::string & expression, const bool verbose = true)
 	{
+		const std::string ns = (expression.size() <= 40) ? expression : mpz_to_short_string(n);
+
 		int32_t a = 2;
 		while (mpz_si_kronecker(a, n) != -1) { ++a; const int32_t s = std::lround(std::sqrt(double(a))); if (s * s == a) ++a; }
 
-		transform * const p_transform = new transformGMP(n);
+		if (verbose) std::cout << "Running Euler probable primality test of " << ns << " to base " << a << std::endl;
+
+		transform * const p_transform = new transformGMP(n, a, verbose);
+		if (p_transform->init_failed())
+		{
+			if (verbose)
+			{
+				mpz_t f; mpz_init(f);
+				p_transform->get_factor(f);
+				const size_t size = mpz_sizeinbase(f, 10);
+				std::string str; str.resize(size + 80);
+				mpz_get_str(str.data(), 10, f);
+				mpz_clear(f);
+				std::cout << str << " divides " << ns << "." << std::endl;
+			}
+			delete _transform;
+			return EReturn::Success;
+		}
+
 		_transform = p_transform;
 
 		mpz_t exponent; mpz_init(exponent);
@@ -92,7 +122,7 @@ public:
 
 		const int B_GL = B_GerbiczLi(mpz_sizeinbase(exponent, 2));
 
-		p_transform->set(1);
+		p_transform->set1();
 		p_transform->copy(1, 0);	// d(t)
 
 		const int i0 = int(mpz_sizeinbase(exponent, 2)) - 1;
@@ -124,16 +154,16 @@ public:
 		mpz_t t; mpz_init(t);
 		while (mpz_sgn(exponent) != 0)
 		{
-			mpz_mod_2exp(t, exponent, (unsigned long int)(B_GL));
+			mpz_mod_2exp(t, exponent, mp_bitcnt_t(B_GL));
 			mpz_add(res, res, t);
-			mpz_div_2exp(exponent, exponent, (unsigned long int)(B_GL));
+			mpz_div_2exp(exponent, exponent, mp_bitcnt_t(B_GL));
 		}
 		mpz_clear(t); mpz_clear(exponent);
 
 		const int res_size = int(mpz_sizeinbase(res, 2));
 
 		// a^{res - 2^B}
-		p_transform->set(1);
+		p_transform->set1();
 		for (int i = res_size - 1; i >= B_GL; --i)
 		{
 			if (quitting()) { mpz_clear(res); return EReturn::Aborted; }
@@ -160,11 +190,14 @@ public:
 
 		if (success)
 		{
-			const char * const ns = (expression.size() <= 40) ? expression.c_str() : "input";
-			std::cout << ns << " is ";
-			if (is_prp) std::cout << "a probable prime";
-			else std::cout << "composite, res64 = " << uint64_to_string(res64);
-			std::cout << ", a = " << a << "." << std::endl;
+			if (verbose)
+			{
+				std::cout << ns << " is ";
+				if (is_prp) std::cout << "a probable prime";
+				else std::cout << "composite, res64 = " << uint64_to_string(res64);
+				std::cout << ", a = " << a << "." << std::endl;
+			}
+			else if (is_prp) std::cout << ns << " is a probable prime, a = " << a << "." << std::endl;
 		}
 
 		delete _transform;

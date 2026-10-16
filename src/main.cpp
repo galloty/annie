@@ -34,6 +34,8 @@ extern "C" {
 }
 #pragma GCC diagnostic pop
 
+#define	QUICK_TEST	true
+
 class application
 {
 private:
@@ -148,7 +150,30 @@ public:
 
 		std::cout << header(args) << std::endl;
 
-		std::string expression = "152^(2^11)+1", filename;	// 4397E2484A3A6450
+#ifdef QUICK_TEST
+		_instance = new annie();
+
+		mpz_t n; mpz_init(n);
+		// 3, 4, 5, 7, 11, 13, 17, 23, 29, 43, 47, 83, 131, 137, 359, 431, 433, 449, 509, 569, 571, 2971, 4723, 5387,
+		// 9311, 9677, 14431, 25561, 30757, 35999, 37511, 50833, 81839, 104911, 130021, 148091, 201107
+		for (unsigned long i = 7; i <= 5387; ++i)
+		{
+			const std::string expression = "fibonacci(" + std::to_string(i) + ")";
+			mpz_fib_ui(n, i);
+			if (mpz_even_p(n) != 0) continue;
+
+			const annie::EReturn ret = _instance->check(n, expression, false);
+			if (ret != annie::EReturn::Success)
+			{
+				if (ret == annie::EReturn::Failed) std::cout << expression << ": validation failed!";
+				else if (ret == annie::EReturn::Aborted) std::cout << expression << ": test was aborted.";
+				std::cout << std::endl;
+				break;
+			}
+		}
+		mpz_clear(n);
+#else
+		std::string expression = "167!-1", filename;	// DC2EBAF7065DD7D2
 		size_t device = 0;
 
 		// parse args
@@ -230,6 +255,7 @@ public:
 		if (ret == annie::EReturn::Failed) std::cout << "Validation failed!";
 		else if (ret == annie::EReturn::Aborted) std::cout << "Test was aborted.";
 		std::cout << std::endl;
+#endif
 	}
 };
 
