@@ -9,8 +9,6 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #include <cstdint>
 
-#include <gmp.h>
-
 #include "transform.h"
 
 class transformGMP : public transform
@@ -20,7 +18,6 @@ private:
 	mp_bitcnt_t _n;
 	mpz_t _N, _Ninv, _R, _Q, _one;
 	mpz_t _t_R, _t_Q, _t;
-	mpz_t _regm;
 	mpz_t _reg[reg_count];
 	bool _init_failed = false;
 
@@ -93,9 +90,7 @@ private:
 
 	void reduceMMGW(mpz_t & x)
 	{
-		// m'
-		mpz_mul(x, _t_R, _Ninv);
-		mod_R(x);
+		mul_mod_R(x, _t_R, _Ninv);	// m'
 
 		mpz_add_ui(x, x, 2);
 		mul_mod_Q(x, x, _N);
@@ -142,23 +137,18 @@ public:
 		squareMMGW(_reg[0], a);
 	}
 
-	void init_multiplicand(const size_t src) override
+	void mul(const size_t dst, const size_t src) override
 	{
-		mpz_set(_regm, _reg[src]);
-	}
-
-	void mul(const size_t dst) override
-	{
-		mulMMGW(_reg[dst], _regm);
+		mulMMGW(_reg[dst], _reg[src]);
 	}
 
 	bool init_failed() const override { return _init_failed; }
 	void get_factor(mpz_t & z) const override { mpz_set(z, _Ninv); }
 
 public:
-	transformGMP(const mpz_t & N, const int32_t a, const bool verbose) : transform(N)
+	transformGMP(const mpz_t & N, const int32_t a, const bool verbose) : transform()
 	{
-		mpz_init_set(_N, N); mpz_inits(_Ninv, _R, _Q, _one, _t_R, _t_Q, _t, _regm, nullptr);
+		mpz_init_set(_N, N); mpz_inits(_Ninv, _R, _Q, _one, _t_R, _t_Q, _t, nullptr);
 		for (size_t i = 0; i < reg_count; ++i) mpz_init(_reg[i]);
 
 		// R = 2^n - 1, Q = 2^n + 1 such that 2^n > 16 * a * N
@@ -182,7 +172,7 @@ public:
 
 	virtual ~transformGMP()
 	{
-		mpz_clears(_N, _Ninv, _R, _Q, _one, _t_R, _t_Q, _t, _regm, nullptr);
+		mpz_clears(_N, _Ninv, _R, _Q, _one, _t_R, _t_Q, _t, nullptr);
 		for (size_t i = 0; i < reg_count; ++i) mpz_clear(_reg[i]);
 	}
 };

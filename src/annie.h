@@ -15,7 +15,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #include <gmp.h>
 
-#include "transformGMP.h"
+#include "transformCPU.h"
 
 class annie
 {
@@ -98,7 +98,7 @@ public:
 
 		if (verbose) std::cout << "Running Euler probable primality test of " << ns << " to base " << a << std::endl;
 
-		transform * const p_transform = new transformGMP(n, a, verbose);
+		transform * const p_transform = new transformCPU(n, a, verbose);
 		if (p_transform->init_failed())
 		{
 			if (verbose)
@@ -134,31 +134,36 @@ public:
 
 			if ((i % B_GL == 0) && (i / B_GL != 0))
 			{
-				p_transform->init_multiplicand(0);
-				p_transform->mul(1);	// d(t)
+				p_transform->mul(1, 0);	// d(t)
 			}
 		}
 
-		// save result to multiplicand
-		p_transform->init_multiplicand(0);
-
-		const bool is_prp = p_transform->is_minus_one(0);
-		p_transform->square_mul(1);
-		const uint64_t res64 = p_transform->get_res64(0);
-
 		// d(t + 1) = d(t) * result
-		p_transform->copy(2, 1);
-		p_transform->mul(2);
+		p_transform->copy(2, 0);
+		p_transform->mul(2, 1);
+
+		mpz_t t; mpz_init(t);
+
+		// result ?= -1
+		p_transform->get(t, 0);
+		mpz_add_ui(t, t, 1); if (mpz_cmp(t, n) >= 0) mpz_sub(t, t, n);
+		const bool is_prp = (mpz_sgn(t) == 0);
+
+		// a^(n - 1) mod n
+		p_transform->square_mul(1);
+
+		// 64-bit residue 
+		p_transform->get(t, 0);
+		const uint64_t res64 = (mpz_size(t) != 0) ? uint64_t(mpz_getlimbn(t, 0)) : uint64_t(0);
 
 		mpz_t res; mpz_init_set_ui(res, 0);
-		mpz_t t; mpz_init(t);
 		while (mpz_sgn(exponent) != 0)
 		{
 			mpz_mod_2exp(t, exponent, mp_bitcnt_t(B_GL));
 			mpz_add(res, res, t);
 			mpz_div_2exp(exponent, exponent, mp_bitcnt_t(B_GL));
 		}
-		mpz_clear(t); mpz_clear(exponent);
+		mpz_clears(t, exponent, nullptr);
 
 		const int res_size = int(mpz_sizeinbase(res, 2));
 
@@ -171,8 +176,7 @@ public:
 		}
 
 		// a^{res - 2^B} * d(t)
-		p_transform->init_multiplicand(1);
-		p_transform->mul(0);
+		p_transform->mul(0, 1);
 
 		// (a^{res - 2^B} * d(t))^2^B = a^res * d(t)^{2^B}
 		for (int i = B_GL - 1; i >= 0; --i)
@@ -184,9 +188,11 @@ public:
 		mpz_clear(res);
 
 		// d(t)^{2^B} * a^res ?= d(t + 1)
-		const uint64_t h1 = p_transform->gethash64(0);
-		const uint64_t h2 = p_transform->gethash64(2);
-		const bool success = (h1 == h2);
+		mpz_t r1, r2; mpz_inits(r1, r2, nullptr);
+		p_transform->get(r1, 0);
+		p_transform->get(r2, 2);
+		const bool success = (mpz_cmp(r1, r2) == 0);
+		mpz_clears(r1, r2, nullptr);
 
 		if (success)
 		{
