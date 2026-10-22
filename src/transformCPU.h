@@ -13,16 +13,12 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #include "transform.h"
 
-#define LBASE	16
-#define BASE	(1 << LBASE)
-
 // The prime finite field with p = 2^64 - 2^32 + 1
 class Zp
 {
 private:
 	uint64_t _n;
 
-public:
 	static const uint64_t p = (((1ull << 32) - 1) << 32) + 1;
 
 private:
@@ -42,10 +38,11 @@ private:
 
 public:
 	Zp() {}
+	explicit Zp(const uint32_t n) : _n(n) {}
+
+	static uint64_t get_p() { return p; }
 
 	uint32_t get() const { return uint32_t(_n); }
-	void set(const uint32_t n) { _n = n; }
-
 	int64_t geti() const { return (_n >= p / 2) ? int64_t(_n - p) : int64_t(_n); }
 
 	Zp & operator+=(const Zp & rhs) { const uint64_t c = (_n >= p - rhs._n) ? p : 0; _n += rhs._n; _n -= c; return *this; }
@@ -56,13 +53,11 @@ public:
 	Zp operator-(const Zp & rhs) const { Zp r = *this; r -= rhs; return r; }
 	Zp operator*(const Zp & rhs) const { return mulmod(rhs); }
 
-	Zp half() const { return (_n % 2 == 0) ? Zp(_n / 2) : Zp((_n + 1) / 2 + (p - 1) / 2); }
-
 	Zp pow(const uint64_t e) const
 	{
-		if (e == 0) return Zp(1);
+		if (e == 0) return Zp(1u);
 
-		Zp r = Zp(1), y = *this;
+		Zp r = Zp(1u), y = *this;
 		for (uint64_t i = e; i > 1; i /= 2)
 		{
 			if (i % 2 != 0) r *= y;
@@ -74,19 +69,22 @@ public:
 	}
 
 	Zp invert() const { return Zp(pow(p - 2)); }
-	static const Zp primroot_n(const size_t n) { return Zp(7).pow((p - 1) / n); }
+	static Zp primroot_n(const size_t n) { return Zp(7u).pow((p - 1) / n); }
+	static Zp norm(const size_t n) { return Zp(p - (p - 1) / n); }
 };
 
 class transformCPU : public transform
 {
 private:
 	static const size_t reg_count = 3;
-	size_t _n;
+	size_t _n = 0;
+	int _lbase = 0;
+	Zp _norm;
 	mpz_t _Nz;
-	std::vector<Zp> _N, _Ninv, _one;
-	std::vector<Zp> _t_R, _t_Q;
-	std::vector<Zp> _reg[reg_count];
-	std::vector<Zp> _w_R, _wi_R, _w_Q, _wi_Q;
+	Zp * _N_Q = nullptr; Zp * _Ninv_R = nullptr; Zp * _one = nullptr;
+	Zp * _t_R = nullptr; Zp * _t_Q = nullptr; Zp * _t = nullptr;
+	Zp * _reg[reg_count];
+	Zp * _w_R; Zp * _wi_R; Zp * _w_Q; Zp * _wi_Q;
 	bool _init_failed = false;
 
 private:
@@ -105,7 +103,7 @@ private:
 		Zp sr_s = Zp::primroot_n(n), sr_si = sr_s.invert();	// (-1)^{1/s}
 		for (size_t s = n / 2; s >= 1; s /= 2)
 		{
-			Zp t_j, ti_j; t_j.set(1u); ti_j.set(1u);
+			Zp t_j = Zp(1u), ti_j = Zp(1u);
 			for (size_t j = 0; j < s; ++j)
 			{
 				const size_t jr = bitrev(j, s);
@@ -148,13 +146,14 @@ private:
 	void set_mpz(Zp * const y, const mpz_t & x) const
 	{
 		const size_t n = _n;
+		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
 
 		mpz_t s, r; mpz_init_set(s, x); mpz_init(r);
 		for (size_t i = 0; i < n; ++i)
 		{
-			mpz_mod_2exp(r, s, LBASE);
-			y[i].set(mpz_get_ui(r));
-			mpz_div_2exp(s, s, LBASE);
+			mpz_mod_2exp(r, s, lbase);
+			y[i] = Zp(uint32_t(mpz_get_ui(r)));
+			mpz_div_2exp(s, s, lbase);
 		}
 		mpz_clears(s, r, nullptr);
 	}
@@ -162,11 +161,12 @@ private:
 	void get_mpz(mpz_t & y, const Zp * const x) const
 	{
 		const size_t n = _n;
+		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
 
 		mpz_set_ui(y, 0);
 		for (size_t i = n; i > 0; --i)
 		{
-			mpz_mul_2exp(y, y, LBASE);
+			mpz_mul_2exp(y, y, lbase);
 			mpz_add_ui(y, y, x[i - 1].get());
 		}
 	}
@@ -175,15 +175,15 @@ private:
 	{
 		const size_t n = _n;
 
-		for (size_t m = n / 2, s = 1; m > 0; m /= 2, s *= 2)
+		for (size_t m = n / 2, s = 1; m >= 1; m /= 2, s *= 2)
 		{
 			for (size_t j = 0; j < s; ++j)
 			{
-				const Zp sr = w[s + j];
+				const Zp wsj = w[s + j];
 				for (size_t i = 0; i < m; ++i)
 				{
 					const size_t k = 2 * m * j + i;
-					const Zp u0 = x[k + 0 * m], u1 = sr * x[k + 1 * m];
+					const Zp u0 = x[k + 0 * m], u1 = wsj * x[k + 1 * m];
 					x[k + 0 * m] = u0 + u1;
 					x[k + 1 * m] = u0 - u1;
 				}
@@ -195,17 +195,17 @@ private:
 	{
 		const size_t n = _n;
 
-		for (size_t m = 1, s = n / 2; s > 0; m *= 2, s /= 2)
+		for (size_t m = 1, s = n / 2; s >= 1; m *= 2, s /= 2)
 		{
 			for (size_t j = 0; j < s; ++j)
 			{
-				const Zp sr_inv = w_i[s + j];
+				const Zp wsj_i = w_i[s + j];
 				for (size_t i = 0; i < m; ++i)
 				{
 					const size_t k = 2 * m * j + i;
 					const Zp u0 = x[k + 0 * m], u1 = x[k + 1 * m];
-					x[k + 0 * m] = Zp(u0 + u1).half();	// TODO
-					x[k + 1 * m] = Zp(u0 - u1).half() * sr_inv;
+					x[k + 0 * m] = u0 + u1;
+					x[k + 1 * m] = (u0 - u1) * wsj_i;
 				}
 			}
 		}
@@ -217,63 +217,61 @@ private:
 		for (size_t k = 0; k < n; ++k) y[k] *= x[k];
 	}
 
-	void carry_mul(Zp * const x, const int32_t a, const bool nega) const
+	void carry_complete(Zp * const x, const int64_t carry, const bool nega) const
 	{
 		const size_t n = _n;
+		const int lbase = _lbase;
+		const uint32_t base = (1u << lbase);
 
-		int64_t f = 0;
-		for (size_t i = 0; i < n; ++i)
-		{
-			f += a * x[i].geti();
-			int64_t r = f % BASE;	// TODO
-			if (r < 0) r += BASE;
-			f = (f - r) / BASE;
-			x[i].set(uint32_t(r));
-		}
-
+		int64_t f = carry;
 		while (f != 0)
 		{
 			if (nega) f = -f;
 			for (size_t i = 0; i < n; ++i)
 			{
-				f += x[i].geti();
-				int64_t r = f % BASE;
-				if (r < 0) r += BASE;
-				f = (f - r) / BASE;
-				x[i].set(uint32_t(r));
+				f += int64_t(x[i].get());
+				x[i] = Zp(uint32_t(f) & (base - 1));
+				f >>= lbase;
 				if (f == 0) return;
 			}
 		}
 	}
 
-	void carry_sub(Zp * const x, const Zp * const Q, const bool nega) const
+	int64_t carry_mul(Zp * const x, const int32_t a) const
 	{
 		const size_t n = _n;
+		const int lbase = _lbase;
+		const uint32_t base = (1u << lbase);
+		const Zp norm = _norm;
 
 		int64_t f = 0;
 		for (size_t i = 0; i < n; ++i)
 		{
-			f += x[i].geti();
-			if (Q != nullptr) f -= Q[i].geti();
-			int64_t r = f % BASE;
-			if (r < 0) r += BASE;
-			f = (f - r) / BASE;
-			x[i].set(uint32_t(r));
+			f += a * (x[i] * norm).geti();
+			x[i] = Zp(uint32_t(f) & (base - 1));
+			f >>= lbase;
 		}
 
-		while (f != 0)
+		return f;
+	}
+
+	int64_t carry_sub(Zp * const x, const Zp * const y) const
+	{
+		const size_t n = _n;
+		const int lbase = _lbase;
+		const uint32_t base = (1u << lbase);
+		const Zp norm = _norm;
+
+		int64_t f = 0;
+		for (size_t i = 0; i < n; ++i)
 		{
-			if (nega) f = -f;
-			for (size_t i = 0; i < n; ++i)
-			{
-				f += x[i].geti();
-				int64_t r = f % BASE;
-				if (r < 0) r += BASE;
-				f = (f - r) / BASE;
-				x[i].set(uint32_t(r));
-				if (f == 0) return;
-			}
+			f += (x[i] * norm).geti();
+			f -= int64_t(y[i].get());
+			x[i] = Zp(uint32_t(f) & (base - 1));
+			f >>= lbase;
 		}
+
+		return f;
 	}
 
 	// Modular arithmetic
@@ -281,81 +279,82 @@ private:
 	void square_mul_mod_R(Zp * const z, const Zp * const x, const int32_t a)
 	{
 		set(z, x);
-		NTT_forward(z, _w_R.data());
+		NTT_forward(z, _w_R);
 		mul_pointwise(z, z);
-		NTT_inverse(z, _wi_R.data());
- 		carry_mul(z, a, false);
+		NTT_inverse(z, _wi_R);
+ 		const int64_t carry = carry_mul(z, a);
+		carry_complete(z, carry, false);
 	}
 
 	void square_mul_mod_Q(Zp * const z, const Zp * const x, const int32_t a)
 	{
 		set(z, x);
-		NTT_forward(z, _w_Q.data());
+		NTT_forward(z, _w_Q);
 		mul_pointwise(z, z);
-		NTT_inverse(z, _wi_Q.data());
- 		carry_mul(z, a, true);
+		NTT_inverse(z, _wi_Q);
+ 		const int64_t carry = carry_mul(z, a);
+		carry_complete(z, carry, true);
 	}
 
-	void mul_mod_R(Zp * const z, const Zp * const x, const Zp * const y)
+	void mul_mod_R(Zp * const z, const Zp * const x, const Zp * const yt)
 	{
 		set(z, x);
-		NTT_forward(z, _w_R.data());
-		std::vector<Zp> t(_n); set(t.data(), y);
-		NTT_forward(t.data(), _w_R.data());
-		mul_pointwise(z, t.data());
-		NTT_inverse(z, _wi_R.data());
- 		carry_mul(z, 1, false);
+		NTT_forward(z, _w_R);
+		mul_pointwise(z, yt);
+		NTT_inverse(z, _wi_R);
+ 		const int64_t carry = carry_mul(z, 1);
+		carry_complete(z, carry, false);
 	}
 
-	void mul_sub_mod_Q(Zp * const z, const Zp * const x, const Zp * const y, const Zp * const s)
+	void mul_sub_mod_Q(Zp * const z, const Zp * const x, const Zp * const yt, const Zp * const s)
 	{
 		set(z, x);
-		NTT_forward(z, _w_Q.data());
-		std::vector<Zp> t(_n); set(t.data(), y);
-		NTT_forward(t.data(), _w_Q.data());
-		mul_pointwise(z, t.data());
-		NTT_inverse(z, _wi_Q.data());
- 		carry_sub(z, s, true);
+		NTT_forward(z, _w_Q);
+		mul_pointwise(z, yt);
+		NTT_inverse(z, _wi_Q);
+ 		const int64_t carry = (s != nullptr) ? carry_sub(z, s) : carry_mul(z, 1);
+		carry_complete(z, carry, true);
 	}
 
 	// Montgomery-McLaughlin-Gallot-Woltman multiplication
 
 	void reduceMMGW(Zp * const x)
 	{
-		mul_mod_R(x, _t_R.data(), _Ninv.data());	// m'
+		mul_mod_R(x, _t_R, _Ninv_R);	// m'
 
-		x[0].set(x[0].get() + 2);
-		mul_sub_mod_Q(x, x, _N.data(), _t_Q.data());
+		x[0] = Zp(x[0].get() + 2);
+		mul_sub_mod_Q(x, x, _N_Q, _t_Q);
 	}
 
 	void mulMMGW(Zp * const x, const Zp * const y)
 	{
-		mul_mod_R(_t_R.data(), x, y);
-		mul_sub_mod_Q(_t_Q.data(), x, y, nullptr);
+		set(_t, y); NTT_forward(_t, _w_R);
+		mul_mod_R(_t_R, x, _t);
+		set(_t, y); NTT_forward(_t, _w_Q);
+		mul_sub_mod_Q(_t_Q, x, _t, nullptr);
 		reduceMMGW(x);
 	}
 
 	void squareMMGW(Zp * const x, const int32_t a)
 	{
-		square_mul_mod_R(_t_R.data(), x, a);
-		square_mul_mod_Q(_t_Q.data(), x, a);
+		square_mul_mod_R(_t_R, x, a);
+		square_mul_mod_Q(_t_Q, x, a);
 		reduceMMGW(x);
 	}
 
 public:
 	void set1() override
 	{
-		set(_reg[0].data(), _one.data());
+		set(_reg[0], _one);
 	}
 
 	void get(mpz_t & z, const size_t src) override
 	{
 		// Conversion out of Montgomery-McLaughlin-Gallot-Woltman form
-		set(_t_R.data(), _reg[src].data());
-		set(_t_Q.data(), _reg[src].data());
-		std::vector<Zp> t(_n);
-		reduceMMGW(t.data());
-		get_mpz(z, t.data());
+		set(_t_R, _reg[src]);
+		set(_t_Q, _reg[src]);
+		reduceMMGW(_t);
+		get_mpz(z, _t);
 
 		// 0 <= z < mod
 		mpz_mod(z, z, _Nz);
@@ -363,17 +362,17 @@ public:
 
 	void copy(const size_t dst, const size_t src) override
 	{
-		set(_reg[dst].data(), _reg[src].data());
+		set(_reg[dst], _reg[src]);
 	}
 
 	void square_mul(const int32_t a) override
 	{
-		squareMMGW(_reg[0].data(), a);
+		squareMMGW(_reg[0], a);
 	}
 
 	void mul(const size_t dst, const size_t src) override
 	{
-		mulMMGW(_reg[dst].data(), _reg[src].data());
+		mulMMGW(_reg[dst], _reg[src]);
 	}
 
 	bool init_failed() const override { return _init_failed; }
@@ -384,46 +383,71 @@ public:
 	{
 		mpz_t R, t; mpz_inits(_Nz, R, t, nullptr);
 
-		// R = BASE^n - 1, Q = BASE^n + 1 such that BASE^n > 16 * a * N and n is a power of two
-		const size_t m = (mpz_sizeinbase(N, 2) + size_t(32 - __builtin_clz(uint32_t(a))) + 4 + LBASE - 1) / LBASE;
-		size_t n = 1; while (n < m) n *= 2; _n = n;
+		// R = base^n - 1, Q = base^n + 1 such that base^n > 16 * a * N and n is a power of two
+		size_t m_2 = mpz_sizeinbase(N, 2) + size_t(32 - __builtin_clz(uint32_t(a))) + 4, n;
+		unsigned int lbase;
+		for (lbase = 31; lbase >= 1; --lbase)
+		{
+			// base is a power of two
+			const uint32_t base = (1u << lbase);
+			const size_t m = (m_2 + lbase - 1) / lbase;
+			n = 1; while (n < m) n *= 2;
+			// A necessary condition is a * n * (base - 1)^2 < p / 2
+			if ((base - 1) * uint64_t(base - 1) < Zp::get_p() / 2 / uint32_t(a) / n)
+			{
+				_n = n;
+				_lbase = int(lbase);
+				break;
+			}
+		}
+		_norm = Zp::norm(n);
 
-		_N.resize(n); _Ninv.resize(n); _one.resize(n);
-		_t_R.resize(n); _t_Q.resize(n);
-		for (size_t i = 0; i < reg_count; ++i) _reg[i].resize(n);
+		_N_Q = new Zp[n]; _Ninv_R = new Zp[n]; _one = new Zp[n];
+		_t_R = new Zp[n]; _t_Q = new Zp[n];  _t = new Zp[n];
+		for (size_t i = 0; i < reg_count; ++i) _reg[i] = new Zp[n];
 
-		mpz_set_ui(R, 1); mpz_mul_2exp(R, R, mp_bitcnt_t(n * LBASE)); mpz_sub_ui(R, R, 1);
+		_w_R = new Zp[n]; _wi_R = new Zp[n];
+		roots_R(_w_R, _wi_R);
+		_w_Q = new Zp[n]; _wi_Q = new Zp[n];
+		roots_Q(_w_Q, _wi_Q);
+
+		mpz_set_ui(R, 1); mpz_mul_2exp(R, R, mp_bitcnt_t(n * lbase)); mpz_sub_ui(R, R, 1);
 		if (mpz_invert(t, N, R) == 0)
 		{
 			mpz_gcd(_Nz, N, R);
 			_init_failed = true;
+			mpz_clears(R, t, nullptr);
 			return;
 		}
 		else
 		{
 			mpz_set(_Nz, N);
-			set_mpz(_N.data(), N);
-			set_mpz(_Ninv.data(), t);
+			set_mpz(_N_Q, N);
+			NTT_forward(_N_Q, _w_Q);
+			set_mpz(_Ninv_R, t);
+			NTT_forward(_Ninv_R, _w_R);
 		}
 
 		// The Montgomery-McLaughlin-Gallot-Woltman form of x is R/2 * x mod N
-		mpz_set(t, R); mpz_mod(t, t, N);
+		mpz_mod(t, R, N);
 		if (mpz_odd_p(t) != 0) mpz_add(t, t, N);
 		mpz_div_2exp(t, t, 1);
-		set_mpz(_one.data(), t);
+		set_mpz(_one, t);
 
 		mpz_clears(R, t, nullptr);
 
-		_w_R.resize(n); _wi_R.resize(n);
-		roots_R(_w_R.data(), _wi_R.data());
-		_w_Q.resize(n); _wi_Q.resize(n);
-		roots_Q(_w_Q.data(), _wi_Q.data());
-
-		if (verbose) std::cout << "Montgomery-McLaughlin-Gallot-Woltman reduction of length " << n << "x" << LBASE << " bits" << std::endl;
+		if (verbose) std::cout << "Montgomery-McLaughlin-Gallot-Woltman reduction of length " << n << "x" << lbase << " bits" << std::endl;
 	}
 
 	virtual ~transformCPU()
 	{
 		mpz_clear(_Nz);
+
+		delete[] _N_Q; delete[] _Ninv_R; delete[] _one;
+		delete[] _t_R; delete[] _t_Q; delete[] _t;
+		for (size_t i = 0; i < reg_count; ++i) delete[] _reg[i];
+
+		delete[] _w_R; delete[] _wi_R;
+		delete[] _w_Q; delete[] _wi_Q;
 	}
 };
