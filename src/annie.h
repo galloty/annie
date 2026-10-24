@@ -9,12 +9,14 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #include <cstdint>
 #include <string>
+#include <cstring>
 #include <iomanip>
 #include <cmath>
 #include <atomic>
 
 #include <gmp.h>
 
+#include "transformGMP.h"
 #include "transformCPU.h"
 
 class annie
@@ -71,11 +73,20 @@ private:
 		return ss.str();
 	}
 
+	static size_t digits(const mpz_t & n)
+	{
+		const size_t sizeinbase10 = mpz_sizeinbase(n, 10);	// The result is exact or one too big
+		std::string str; str.resize(sizeinbase10 + 64);
+		mpz_get_str(str.data(), 10, n);
+		return std::strlen(str.c_str());
+	}
+
 	static std::string mpz_to_short_string(const mpz_t & n)
 	{
-		const size_t size = mpz_sizeinbase(n, 10);
-		std::string str; str.resize(size + 80);
+		const size_t sizeinbase10 = mpz_sizeinbase(n, 10);
+		std::string str; str.resize(sizeinbase10 + 64);
 		mpz_get_str(str.data(), 10, n);
+		const size_t size = std::strlen(str.c_str());
 		if (size <= 40) return str;
 		return str.substr(0, 8) + "[" + std::to_string(size - 16) + " other digits]" + str.substr(size - 8, 8);
 	}
@@ -91,22 +102,40 @@ private:
 public:
 	EReturn check(const mpz_t & n, const std::string & expression, const bool verbose = true)
 	{
+		const size_t nsize = digits(n);
 		const std::string ns = (expression.size() <= 40) ? expression : mpz_to_short_string(n);
+
+		if (nsize <= 15)
+		{
+			const int r = mpz_probab_prime_p(n, 20);
+			if (r != 0)
+			{
+				const char * const prp = (r == 1) ? "a probable " : "";
+				std::cout << ns << " is " << prp << "prime." << std::endl;
+			}
+			else if (verbose) std::cout << ns << " is composite." << std::endl;
+			return EReturn::Success;
+		}
+
+		if (mpz_even_p(n) != 0)
+		{
+			if (verbose) std::cout << ns << " is composite." << std::endl;
+			return EReturn::Success;
+		}
 
 		int32_t a = 2;
 		while (mpz_si_kronecker(a, n) != -1) { ++a; const int32_t s = std::lround(std::sqrt(double(a))); if (s * s == a) ++a; }
 
-		if (verbose) std::cout << "Running Euler probable primality test of " << ns << " to base " << a << std::endl;
+		if (verbose) std::cout << "Running Euler probable primality test of " << ns << " to base " << a << " [" << nsize << " digits]" << std::endl;
 
-		transform * const p_transform = new transformCPU(n, a, verbose);
+		transform * const p_transform = (nsize < 80) ? (transform *)(new transformGMP(n, a, verbose)) : (transform *)(new transformCPU(n, a, verbose));
 		if (p_transform->init_failed())
 		{
 			if (verbose)
 			{
 				mpz_t f; mpz_init(f);
 				p_transform->get_factor(f);
-				const size_t size = mpz_sizeinbase(f, 10);
-				std::string str; str.resize(size + 80);
+				std::string str; str.resize(mpz_sizeinbase(f, 10) + 64);
 				mpz_get_str(str.data(), 10, f);
 				mpz_clear(f);
 				std::cout << str << " divides " << ns << "." << std::endl;
@@ -196,14 +225,14 @@ public:
 
 		if (success)
 		{
-			if (verbose)
+			if (is_prp)
 			{
-				std::cout << ns << " is ";
-				if (is_prp) std::cout << "a probable prime";
-				else std::cout << "composite, res64 = " << uint64_to_string(res64);
-				std::cout << ", a = " << a << "." << std::endl;
+				std::cout << ns << " is a probable prime, a = " << a << "." << std::endl;
 			}
-			else if (is_prp) std::cout << ns << " is a probable prime, a = " << a << "." << std::endl;
+			else if (verbose)
+			{
+				std::cout << ns << " is composite, res64 = " << uint64_to_string(res64) << ", a = " << a << "." << std::endl;
+			}
 		}
 
 		delete _transform;

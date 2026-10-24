@@ -156,13 +156,13 @@ public:
 		mpz_t n; mpz_init(n);
 		// 3, 4, 5, 7, 11, 13, 17, 23, 29, 43, 47, 83, 131, 137, 359, 431, 433, 449, 509, 569, 571, 2971, 4723, 5387,
 		// 9311, 9677, 14431, 25561, 30757, 35999, 37511, 50833, 81839, 104911, 130021, 148091, 201107
-		for (unsigned long i = 7; i <= 5387; ++i)
+		for (unsigned long j = 3; j <= 5388; ++j)
 		{
+			const unsigned long i = (j == 5388) ? 30757 : j;
 			const std::string expression = "fibonacci(" + std::to_string(i) + ")";
 			mpz_fib_ui(n, i);
-			if (mpz_even_p(n) != 0) continue;
 
-			const annie::EReturn ret = _instance->check(n, expression, false);
+			const annie::EReturn ret = _instance->check(n, expression, (j < 5) || (j == 5388));
 			if (ret != annie::EReturn::Success)
 			{
 				if (ret == annie::EReturn::Failed) std::cout << expression << ": validation failed!";
@@ -173,7 +173,7 @@ public:
 		}
 		mpz_clear(n);
 #else
-		std::string expression = "167!-1", filename;	// DC2EBAF7065DD7D2
+		std::string expression = "167!-1", filename;	// DC2EBAF7065DD7D2, 166!-1 is prime
 		size_t device = 0;
 
 		// parse args
@@ -231,22 +231,6 @@ public:
 		pari_close();
 
 		mpz_t n; mpz_init_set_str(n, n_str.c_str(), 10);
-		const int cmp_2 = mpz_cmp_ui(n, 2);
-		if (cmp_2 < 0)
-		{
-			std::ostringstream ss; ss << "input is " << mpz_get_si(n);
-			throw std::runtime_error(ss.str());
-		}
-		if (cmp_2 == 0)
-		{
-			std::cout << "2 is prime." << std::endl;
-			return;
-		}
-		if (mpz_even_p(n) != 0)
-		{
-			std::cout << "input is even." << std::endl;
-			return;
-		}
 
 		_instance = new annie();
 		const annie::EReturn ret = _instance->check(n, expression);
