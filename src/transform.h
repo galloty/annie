@@ -11,6 +11,8 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #include <gmp.h>
 
+#include "file.h"
+
 class transform
 {
 public:
@@ -21,6 +23,9 @@ public:
 	virtual void mul(const size_t dst, const size_t src) = 0;		// r_dst *= r_src
 	virtual bool init_failed() const = 0;
 	virtual void get_factor(mpz_t & z) const = 0;
+
+	virtual bool read_checkpoint(file & cfile) = 0;
+	virtual void save_checkpoint(file & cfile) const = 0;
 
 public:
 	transform() {}

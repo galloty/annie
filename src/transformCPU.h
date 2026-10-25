@@ -740,6 +740,36 @@ public:
 	bool init_failed() const override { return _init_failed; }
 	void get_factor(mpz_t & z) const override { mpz_set(z, _Nz); }
 
+	bool read_checkpoint(file & cfile) override
+	{
+		const size_t n = size_t(1) << _ln;
+
+		uint32_t * const buf = new uint32_t[n];
+		for (size_t i = 0; i < 2; ++i)
+		{
+			if (!cfile.read(reinterpret_cast<char *>(buf), n * sizeof(uint32_t))) { delete[] buf; return false; }
+			RNS * const reg = _reg[i];
+			for (size_t k = 0; k < n; ++k) reg[k] = RNS(buf[k]);
+		}
+		delete[] buf;
+
+		return true;
+	}
+
+	void save_checkpoint(file & cfile) const override
+	{
+		const size_t n = size_t(1) << _ln;
+
+		uint32_t * const buf = new uint32_t[n];
+		for (size_t i = 0; i < 2; ++i)
+		{
+			const RNS * const reg = _reg[i];
+			for (size_t k = 0; k < n; ++k) buf[k] = reg[k].get();
+			if (!cfile.write(reinterpret_cast<const char *>(buf), n * sizeof(uint32_t))) break;
+		}
+		delete[] buf;
+	}
+
 public:
 	transformCPU(const mpz_t & N, const int32_t a, const bool verbose) : transform()
 	{

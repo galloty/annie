@@ -18,6 +18,8 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #include "transformGMP.h"
 #include "transformCPU.h"
+#include "file.h"
+#include "timer.h"
 
 class annie
 {
@@ -32,8 +34,10 @@ public:
 	virtual ~annie() {}
 
 private:
-	transform * _transform = nullptr;
 	std::atomic_bool _quit = false;
+	transform * _transform = nullptr;
+	std::string _checkpoint_filename;
+	int _print_range = 0, _print_i = 0;
 
 protected:
 	bool quitting() const
@@ -99,6 +103,98 @@ private:
 		return int((size - 1) / L) + 1;
 	}
 
+	void init_print_progress(const int i0, const int i_start)
+	{
+		_print_range = i0; _print_i = i_start;
+	}
+
+	int print_progress(const double elapsed_time, const double display_time, const int i)
+	{
+		if (_print_i == i) return 1;
+		const double percent = double(_print_range - i) / _print_range;
+		const double mul_time = display_time / (_print_i - i); _print_i = i;
+		const int dcount = std::max(int(1.0 / mul_time), 2);
+		const double remaining_time = mul_time * i, expected_time = elapsed_time / percent;
+		std::cout << std::setprecision(3) << percent * 100.0 << "% done, " << timer::format_time(remaining_time)
+				<< "/" << timer::format_time(expected_time) << " remaining, " << mul_time * 1e3 << " ms/bit.        \r";
+		return dcount;
+	}
+
+	static void endline() { std::cout << std::endl; }
+	static void clearline() { std::cout << "                                                            \r" << std::flush; }
+
+	int _read_checkpoint(const std::string & filename, int & i, double & elapsed_time)
+	{
+		file checkpoint_file(filename);
+		if (!checkpoint_file.exists()) return -1;
+
+		int version = 0;
+		if (!checkpoint_file.read(reinterpret_cast<char *>(&version), sizeof(version))) return -2;
+		if (version != 1) return -2;
+		if (!checkpoint_file.read(reinterpret_cast<char *>(&i), sizeof(i))) return -2;
+		if (!checkpoint_file.read(reinterpret_cast<char *>(&elapsed_time), sizeof(elapsed_time))) return -2;
+		if (!_transform->read_checkpoint(checkpoint_file)) return -2;
+		if (!checkpoint_file.check_crc32()) return -2;
+		return 0;
+	}
+
+	bool read_checkpoint(int & i, double & elapsed_time)
+	{
+		std::string checkpoint_file = _checkpoint_filename;
+		int error = _read_checkpoint(checkpoint_file, i, elapsed_time);
+		if (error < -1)
+		{
+			std::ostringstream ss; ss << "Error: " << checkpoint_file << ": invalid checkpoint." << std::endl;
+			std::cerr << ss.str();
+		}
+		checkpoint_file += ".old";
+		if (error < 0)
+		{
+			error = _read_checkpoint(checkpoint_file, i, elapsed_time);
+			if (error < -1)
+			{
+				std::ostringstream ss; ss << "Error: " << checkpoint_file << ": invalid checkpoint." << std::endl;
+				std::cerr << ss.str();
+			}
+		}
+		return (error == 0);
+	}
+
+	void save_checkpoint(const int i, const double elapsed_time) const
+	{
+		const std::string checkpoint_file = _checkpoint_filename, old_checkpoint_file = checkpoint_file + ".old", new_checkpoint_file = checkpoint_file + ".new";
+
+		{
+			file checkpoint_file(new_checkpoint_file, "wb", false);
+			int version = 1;
+			if (!checkpoint_file.write(reinterpret_cast<const char *>(&version), sizeof(version))) return;
+			if (!checkpoint_file.write(reinterpret_cast<const char *>(&i), sizeof(i))) return;
+			if (!checkpoint_file.write(reinterpret_cast<const char *>(&elapsed_time), sizeof(elapsed_time))) return;
+			_transform->save_checkpoint(checkpoint_file);
+			checkpoint_file.write_crc32();
+		}
+
+		std::remove(old_checkpoint_file.c_str());
+
+		struct stat s;
+		if ((stat(checkpoint_file.c_str(), &s) == 0) && (std::rename(checkpoint_file.c_str(), old_checkpoint_file.c_str()) != 0))	// file exists and cannot rename it
+		{
+			std::cerr << "Error: cannot save checkpoint." << std::endl;
+		}
+
+		if (std::rename(new_checkpoint_file.c_str(), checkpoint_file.c_str()) != 0)
+		{
+			std::cerr << "Error: cannot save checkpoint." << std::endl;
+		}
+	}
+
+	void clear_checkpoints() const
+	{
+		const std::string checkpoint_file = _checkpoint_filename;
+		std::remove(checkpoint_file.c_str());
+		std::remove(std::string(checkpoint_file + ".old").c_str());
+	}
+
 public:
 	EReturn check(const mpz_t & n, const std::string & expression, const bool verbose = true)
 	{
@@ -146,18 +242,45 @@ public:
 
 		_transform = p_transform;
 
+		std::ostringstream ss; ss << "a_" << nsize << ".chk";
+		_checkpoint_filename = ss.str();
+
 		mpz_t exponent; mpz_init(exponent);
 		mpz_set(exponent, n); mpz_sub_ui(exponent, exponent, 1); mpz_fdiv_q_2exp(exponent, exponent, 1);
 
 		const int B_GL = B_GerbiczLi(mpz_sizeinbase(exponent, 2));
 
-		p_transform->set1();
-		p_transform->copy(1, 0);	// d(t)
-
-		const int i0 = int(mpz_sizeinbase(exponent, 2)) - 1;
-		for (int i = i0; i >= 0; --i)
+		int ri = 0; double restored_time = 0;
+		const bool found = read_checkpoint(ri, restored_time);
+		if (!found)
 		{
-			if (quitting()) return EReturn::Aborted;
+			ri = 0; restored_time = 0;
+			p_transform->set1();
+			p_transform->copy(1, 0);	// d(t)
+		}
+		else std::cout << "Resuming from a checkpoint." << std::endl;
+
+		watch chrono(found ? restored_time : 0);
+		const int i0 = int(mpz_sizeinbase(exponent, 2)) - 1;
+		const int i_start = found ? ri : i0;
+		init_print_progress(i0, i_start);
+		int dcount = 100;
+		
+		for (int i = i_start; i >= 0; --i)
+		{
+			if (quitting())
+			{
+				save_checkpoint(i, chrono.get_elapsed_time());
+				endline();
+				return EReturn::Aborted;
+			}
+
+			if (i % dcount == 0)
+			{
+				const double elapsed_time = chrono.get_elapsed_time(), displayTime = chrono.get_display_time();
+				if (displayTime >= 10) { dcount = print_progress(elapsed_time, displayTime, i); chrono.reset_display_time(); }
+				if (chrono.get_record_time() > 600) { save_checkpoint(i, chrono.get_elapsed_time()); chrono.reset_record_time(); }
+			}
 
 			p_transform->square_mul((mpz_tstbit(exponent, mp_bitcnt_t(i)) != 0) ? a : 1);
 
@@ -200,7 +323,7 @@ public:
 		p_transform->set1();
 		for (int i = res_size - 1; i >= B_GL; --i)
 		{
-			if (quitting()) { mpz_clear(res); return EReturn::Aborted; }
+			if (quitting()) { mpz_clear(res); endline(); return EReturn::Aborted; }
 			p_transform->square_mul((mpz_tstbit(res, mp_bitcnt_t(i)) != 0) ? a : 1);
 		}
 
@@ -210,7 +333,7 @@ public:
 		// (a^{res - 2^B} * d(t))^2^B = a^res * d(t)^{2^B}
 		for (int i = B_GL - 1; i >= 0; --i)
 		{
-			if (quitting()) return EReturn::Aborted;
+			if (quitting()) { mpz_clear(res); endline(); return EReturn::Aborted; }
 			p_transform->square_mul(((i < res_size) && (mpz_tstbit(res, mp_bitcnt_t(i)) != 0)) ? a : 1);
 		}
 
@@ -223,21 +346,26 @@ public:
 		const bool success = (mpz_cmp(r1, r2) == 0);
 		mpz_clears(r1, r2, nullptr);
 
+		delete _transform;
+		_transform = nullptr;
+
+		const double elapsed_time = chrono.get_elapsed_time();
+		clearline();
+
 		if (success)
 		{
 			if (is_prp)
 			{
-				std::cout << ns << " is a probable prime, a = " << a << "." << std::endl;
+				std::cout << ns << " is a probable prime, a = " << a << ", time = " << timer::format_time(elapsed_time) << "." << std::endl;
 			}
 			else if (verbose)
 			{
-				std::cout << ns << " is composite, res64 = " << uint64_to_string(res64) << ", a = " << a << "." << std::endl;
+				std::cout << ns << " is composite, res64 = " << uint64_to_string(res64) << ", a = " << a
+					<< ", time = " << timer::format_time(elapsed_time) << "." << std::endl;
 			}
 		}
 
-		delete _transform;
-		_transform = nullptr;
-
+		clear_checkpoints();
 		return success ? EReturn::Success : EReturn::Failed;
 	}
 };

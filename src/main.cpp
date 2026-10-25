@@ -132,7 +132,6 @@ private:
 		std::ostringstream ss;
 		ss << "Usage: annie -q <expression> or -f <filename> [options]" << std::endl;
 		ss << "  -d <n>    set the OpenCL device number (default 0)" << std::endl << std::endl;
-		// ss << "  -cpu      execute the implementation for CPU" << std::endl;
 		ss << " <expression> is a Pari/GP math expression. It must be an integer." << std::endl;
 		ss << " If the expression is too long, it can be written to the file <filename>." << std::endl;
 		ss << " annie checks if the integer n is an Euler probable prime to base a," << std::endl;
@@ -158,7 +157,7 @@ public:
 		// 9311, 9677, 14431, 25561, 30757, 35999, 37511, 50833, 81839, 104911, 130021, 148091, 201107
 		for (unsigned long j = 3; j <= 5388; ++j)
 		{
-			const unsigned long i = (j == 5388) ? 30757 : j;
+			const unsigned long i = (j == 5388) ? 50833 : j;
 			const std::string expression = "fibonacci(" + std::to_string(i) + ")";
 			mpz_fib_ui(n, i);
 
@@ -252,7 +251,7 @@ int main(int argc, char * argv[])
 	}
 	catch (const std::runtime_error & e)
 	{
-		std::cerr << "Error: " << e.what() << "." << std::endl;
+		std::cerr << std::endl << "Error: " << e.what() << "." << std::endl;
 		return EXIT_FAILURE;
 	}
 

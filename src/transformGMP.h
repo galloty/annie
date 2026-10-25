@@ -146,6 +146,9 @@ public:
 	bool init_failed() const override { return _init_failed; }
 	void get_factor(mpz_t & z) const override { mpz_set(z, _Ninv); }
 
+	bool read_checkpoint(file &) override { return false; }
+	void save_checkpoint(file &) const override {}
+
 public:
 	transformGMP(const mpz_t & N, const int32_t a, const bool verbose) : transform()
 	{
