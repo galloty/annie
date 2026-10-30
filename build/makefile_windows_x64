@@ -8,14 +8,16 @@ SRC_DIR = $(ROOT_DIR)/src
 OCL_INC = -I$(ROOT_DIR)/Khronos
 OCL_LIB = C:/Windows/System32/OpenCL.dll
 
+# Download PARI/GP source distribution
+# tar -xvzf pari-2.19.0.tar.gz
+# ./Configure --static --without-readline --with-gmp
+# mingw32-make install-lib-sta
 PARI_DIR = $(ROOT_DIR)/../pari
 PARI_INC = -I$(PARI_DIR)/headers
 PARI_LIB = $(PARI_DIR)/lib/libpari.a
 
-CFLAGS = -Wall -Wextra -Wsign-conversion
-FLAGS = -O3
+FLAGS = -O3 -Wall -Wextra -Wsign-conversion
 
-OBJS = main.o
 DEPS = $(SRC_DIR)/annie.h $(SRC_DIR)/transform.h $(SRC_DIR)/transformGMP.h $(SRC_DIR)/transformGPU.h $(SRC_DIR)/engine.h $(SRC_DIR)/ocl.h $(SRC_DIR)/timer.h $(SRC_DIR)/file.h
 
 EXEC = $(BIN_DIR)/annie.exe
@@ -24,8 +26,5 @@ EXEC = $(BIN_DIR)/annie.exe
 
 all: $(EXEC)
 
-main.o: $(SRC_DIR)/main.cpp $(DEPS)
-	$(CC) $(CFLAGS) $(OCL_INC) $(PARI_INC) $(FLAGS) -c $< -o $@
-
-$(EXEC): $(OBJS)
-	$(CC) $(FLAGS) -static $^ $(PARI_LIB) -lgmp $(OCL_LIB) -o $@
+$(EXEC): $(SRC_DIR)/main.cpp $(DEPS)
+	$(CC) $(FLAGS) $(OCL_INC) $(PARI_INC) -static $(SRC_DIR)/main.cpp $(PARI_LIB) -lgmp $(OCL_LIB) -o $@
