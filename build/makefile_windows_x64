@@ -1,0 +1,31 @@
+CC = g++ -std=c++17
+
+ROOT_DIR = ..
+
+BIN_DIR = $(ROOT_DIR)/bin
+SRC_DIR = $(ROOT_DIR)/src
+
+OCL_INC = -I$(ROOT_DIR)/Khronos
+OCL_LIB = C:/Windows/System32/OpenCL.dll
+
+PARI_DIR = $(ROOT_DIR)/../pari
+PARI_INC = -I$(PARI_DIR)/headers
+PARI_LIB = $(PARI_DIR)/lib/libpari.a
+
+CFLAGS = -Wall -Wextra -Wsign-conversion
+FLAGS = -O3
+
+OBJS = main.o
+DEPS = $(SRC_DIR)/annie.h $(SRC_DIR)/transform.h $(SRC_DIR)/transformGMP.h $(SRC_DIR)/transformGPU.h $(SRC_DIR)/engine.h $(SRC_DIR)/ocl.h $(SRC_DIR)/timer.h $(SRC_DIR)/file.h
+
+EXEC = $(BIN_DIR)/annie.exe
+
+.PHONY: all
+
+all: $(EXEC)
+
+main.o: $(SRC_DIR)/main.cpp $(DEPS)
+	$(CC) $(CFLAGS) $(OCL_INC) $(PARI_INC) $(FLAGS) -c $< -o $@
+
+$(EXEC): $(OBJS)
+	$(CC) $(FLAGS) -static $^ $(PARI_LIB) -lgmp $(OCL_LIB) -o $@
