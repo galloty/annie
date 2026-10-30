@@ -13,22 +13,13 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #include "transform.h"
 
-class ZP
-{
-protected:
-	uint32_t _n;
-
-public:
-	ZP() {}
-	explicit ZP(const uint32_t n) : _n(n) {}
-
-	uint32_t get() const { return _n; }
-};
-
 // The prime finite field Z/PZ
 template<uint32_t P, uint32_t Q, uint32_t R, uint32_t RSQ, uint32_t H>
-class ZPT : public ZP
+class ZPT
 {
+private:
+	uint32_t _n;
+
 private:
 	static uint32_t _add(const uint32_t a, const uint32_t b) { return a + b - ((a >= P - b) ? P : 0); }
 	static uint32_t _sub(const uint32_t a, const uint32_t b) { return a - b + ((a < b) ? P : 0); }
@@ -57,9 +48,11 @@ private:
 
 public:
 	ZPT() {}
-	explicit ZPT(const uint32_t n) : ZP(n) {}
+	explicit ZPT(const uint32_t n) : _n(n) {}
 
 	static ZPT one() { return ZPT(R); }
+
+	uint32_t get() const { return _n; }
 
 	// Conversion into / out of Montgomery form
 	ZPT toMonty() const { return ZPT(_mul(_n, RSQ)); }
@@ -145,13 +138,13 @@ private:
 	static const size_t reg_count = 3;
 	int _ln = 0;
 	int _lbase = 0;
+	bool _init_failed = false;
 	RNS _norm;
 	mpz_t _Nz;
 	RNS * _N_Q = nullptr; RNS * _Ninv_R = nullptr; RNS * _one = nullptr;
-	RNS * _t_R = nullptr; RNS * _t_Q = nullptr; RNS * _t = nullptr;
+	RNS * _t_Q = nullptr; RNS * _t = nullptr;
 	RNS * _reg[reg_count];
 	RNS * _w_R; RNS * _wi_R; RNS * _w_Q; RNS * _wi_Q;
-	bool _init_failed = false;
 
 private:
 	static void _load(const size_t n, RNS * const xl, const RNS * const x, const size_t s) { for (size_t l = 0; l < n; ++l) xl[l] = x[l * s]; }
@@ -180,9 +173,9 @@ private:
 		BCK2(x[0], x[4], w1_i); BCK2(x[1], x[5], w1_i); BCK2(x[2], x[6], w1_i); BCK2(x[3], x[7], w1_i);
 	}
 
-	static void _forward8_0(RNS x[4], const RNS & w1, const RNS w2[2], const RNS w4[4])
+	static void _forward8_0(RNS x[8], const RNS & w1, const RNS w2[2], const RNS w4[4])
 	{
-		x[0] = x[0].toMonty(); x[1] = x[1].toMonty(); x[2] = x[2].toMonty(); x[3] = x[3].toMonty();
+		for (size_t i = 0; i < 4; ++i) x[i] = x[i].toMonty();
 		_forward8(x, w1, w2, w4);
 	}
 
@@ -217,10 +210,10 @@ private:
 		BCK2(x[0], x[2], w2_i[0]); BCK2(x[1], x[3], w2_i[0]); BCK2(x[4], x[6], w2_i[1]); BCK2(x[5], x[7], w2_i[1]);
 	}
 
-	static void _mul8(RNS x[8], const RNS xp[8], const RNS & w1, const RNS & w1_i, const RNS w2[2], const RNS win2[2])
+	static void _mul8(RNS x[8], const RNS xp[8], const RNS & w1, const RNS & w1_i, const RNS w2[2], const RNS w2_i[2])
 	{
 		FWD2(x[0], x[4], w1); FWD2(x[1], x[5], w1); FWD2(x[2], x[6], w1); FWD2(x[3], x[7], w1);
-		_mul4x2(x, xp, w2, win2);
+		_mul4x2(x, xp, w2, w2_i);
 		BCK2(x[0], x[4], w1_i); BCK2(x[1], x[5], w1_i); BCK2(x[2], x[6], w1_i); BCK2(x[3], x[7], w1_i);
 	}
 
@@ -274,11 +267,11 @@ private:
 
 	static void forward8_0(RNS * const x, const RNS * const w, const size_t n_8)
 	{
+		// Montgomery form of MF of I to convert input into MF
+		const RNS w1 = w[0];
 		RNS w2[2]; _load(2, w2, &w[2], 1);
 		RNS w4[4]; _load(4, w4, &w[4], 1);
 
-		// Montgomery form of MF of I to convert input into MF
-		const RNS w1 = w[0];
 		for (size_t i = 0; i < n_8; ++i)
 		{
 			const size_t k = i;
@@ -292,7 +285,7 @@ private:
 	{
 		for (size_t j = 0; j < n_8; ++j)
 		{
-			RNS w2[2]; _load(2, w2, &w[2 * n_8 + 2 * j], 1);
+			RNS w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
 
 			RNS xl[8]; _load(8, xl, &x[8 * j], 1);
 			_square2x4(xl, w2);
@@ -332,7 +325,7 @@ private:
 	{
 		for (size_t j = 0; j < n_8; ++j)
 		{
-			RNS w2[2]; _load(2, w2, &w[2 * n_8 + 2 * j], 1);
+			RNS w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
 
 			RNS zl[8]; _load(8, zl, &x[8 * j], 1);
 			RNS zpl[8]; _load(8, zpl, &xp[8 * j], 1);
@@ -452,6 +445,7 @@ private:
 
 	static void set(RNS * const y, const RNS * const x, const size_t n)
 	{
+		if (x == y) return;
 		for (size_t k = 0; k < n; ++k) y[k] = x[k];
 	}
 
@@ -483,60 +477,6 @@ private:
 		size_t m = n / 8 / 8, s = 8;
 		for (; m > 1; m /= 8, s *= 8) forward8(x, w, m, s);
 		return s;
-	}
-
-	static void _fwd8(RNS * const x, const RNS * const w, const size_t n)
-	{
-		for (size_t s = n / 8, m = n / s / 2; m >= 1; m /= 2, s *= 2)
-		{
-			for (size_t j = 0; j < s; ++j)
-			{
-				const RNS wsj = w[s + j];
-				for (size_t i = 0; i < m; ++i)
-				{
-					const size_t k = 2 * m * j + i;
-					const RNS u0 = x[k + 0 * m], u1 = wsj * x[k + 1 * m];
-					x[k + 0 * m] = u0 + u1;
-					x[k + 1 * m] = u0 - u1;
-				}
-			}
-		}
-	}
-
-	static void _fwd4x2(RNS * const x, const RNS * const w, const size_t n)
-	{
-		for (size_t s = 2 * n / 8, m = n / s / 2; m >= 1; m /= 2, s *= 2)
-		{
-			for (size_t j = 0; j < s; ++j)
-			{
-				const RNS wsj = w[s + j];
-				for (size_t i = 0; i < m; ++i)
-				{
-					const size_t k = 2 * m * j + i;
-					const RNS u0 = x[k + 0 * m], u1 = wsj * x[k + 1 * m];
-					x[k + 0 * m] = u0 + u1;
-					x[k + 1 * m] = u0 - u1;
-				}
-			}
-		}
-	}
-
-	static void _fwd2x4(RNS * const x, const RNS * const w, const size_t n)
-	{
-		for (size_t s = 4 * n / 8, m = n / s / 2; m >= 1; m /= 2, s *= 2)
-		{
-			for (size_t j = 0; j < s; ++j)
-			{
-				const RNS wsj = w[s + j];
-				for (size_t i = 0; i < m; ++i)
-				{
-					const size_t k = 2 * m * j + i;
-					const RNS u0 = x[k + 0 * m], u1 = wsj * x[k + 1 * m];
-					x[k + 0 * m] = u0 + u1;
-					x[k + 1 * m] = u0 - u1;
-				}
-			}
-		}
 	}
 
 	static void NTT_inverse8(RNS * const x, const RNS * const w_i, const size_t s0, const size_t n)
@@ -621,83 +561,85 @@ private:
 
 	// Modular arithmetic
 
-	void square_mul_mod_R(RNS * const z, const RNS * const x, const int32_t a)
+	void square_mul_mod_R(RNS * const y, const RNS * const x, const int32_t a)
 	{
 		const size_t n = size_t(1) << _ln;
-		const RNS * const w_R = _w_R;
-		const RNS * const wi_R = _wi_R;
-		set(z, x, n); const size_t s0 = NTT_forward8(z, w_R, n);
-		square(z, w_R, wi_R, s0, n);
-		NTT_inverse8(z, wi_R, s0, n);
 		const int lbase = _lbase;
- 		const int64_t carry = carry_mul(z, a, n, lbase, _norm);
-		carry_complete(z, carry, false, n, lbase);
+		set(y, x, n); const size_t s0 = NTT_forward8(y, _w_R, n);
+		square(y, _w_R, _wi_R, s0, n);
+		NTT_inverse8(y, _wi_R, s0, n);
+ 		const int64_t carry = carry_mul(y, a, n, lbase, _norm);
+		carry_complete(y, carry, false, n, lbase);
 	}
 
-	void square_mul_mod_Q(RNS * const z, const RNS * const x, const int32_t a)
+	void square_mul_mod_Q(RNS * const y, const RNS * const x, const int32_t a)
 	{
 		const size_t n = size_t(1) << _ln;
-		const RNS * const w_Q = _w_Q;
-		const RNS * const wi_Q = _wi_Q;
-		set(z, x, n); const size_t s0 = NTT_forward8(z, w_Q, n);
-		square(z, w_Q, wi_Q, s0, n);
-		NTT_inverse8(z, wi_Q, s0, n);
 		const int lbase = _lbase;
- 		const int64_t carry = carry_mul(z, a, n, lbase, _norm);
-		carry_complete(z, carry, true, n, lbase);
+		set(y, x, n); const size_t s0 = NTT_forward8(y, _w_Q, n);
+		square(y, _w_Q, _wi_Q, s0, n);
+		NTT_inverse8(y, _wi_Q, s0, n);
+ 		const int64_t carry = carry_mul(y, a, n, lbase, _norm);
+		carry_complete(y, carry, true, n, lbase);
 	}
 
-	void mul_mod_R(RNS * const z, const RNS * const x, const RNS * const yt)
+	void mul_mod_R(RNS * const y, const RNS * const xt)
 	{
 		const size_t n = size_t(1) << _ln;
-		const RNS * const w_R = _w_R;
-		const RNS * const wi_R = _wi_R;
-		set(z, x, n); const size_t s0 = NTT_forward8(z, w_R, n);
-		mul(z, yt, w_R, wi_R, s0, n);
-		NTT_inverse8(z, wi_R, s0, n);
 		const int lbase = _lbase;
- 		const int64_t carry = carry_mul(z, 1, n, lbase, _norm);
-		carry_complete(z, carry, false, n, lbase);
+		const size_t s0 = NTT_forward8(y, _w_R, n);
+		mul(y, xt, _w_R, _wi_R, s0, n);
+		NTT_inverse8(y, _wi_R, s0, n);
+ 		const int64_t carry = carry_mul(y, 1, n, lbase, _norm);
+		carry_complete(y, carry, false, n, lbase);
 	}
 
-	void mul_sub_mod_Q(RNS * const z, const RNS * const x, const RNS * const yt, const RNS * const s)
+	void mul_mod_Q(RNS * const y, const RNS * const xt)
 	{
 		const size_t n = size_t(1) << _ln;
-		const RNS * const w_Q = _w_Q;
-		const RNS * const wi_Q = _wi_Q;
-		set(z, x, n); const size_t s0 = NTT_forward8(z, w_Q, n);
-		mul(z, yt, w_Q, wi_Q, s0, n);
-		NTT_inverse8(z, wi_Q, s0, n);
 		const int lbase = _lbase;
- 		const int64_t carry = (s != nullptr) ? carry_sub(z, s, n, lbase, _norm) : carry_mul(z, 1, n, lbase, _norm);
-		carry_complete(z, carry, true, n, lbase);
+		const size_t s0 = NTT_forward8(y, _w_Q, n);
+		mul(y, xt, _w_Q, _wi_Q, s0, n);
+		NTT_inverse8(y, _wi_Q, s0, n);
+ 		const int64_t carry = carry_mul(y, 1, n, lbase, _norm);
+		carry_complete(y, carry, true, n, lbase);
+	}
+
+	void mul_sub_mod_Q(RNS * const y, const RNS * const xt, const RNS * const z)
+	{
+		const size_t n = size_t(1) << _ln;
+		const int lbase = _lbase;
+		const size_t s0 = NTT_forward8(y, _w_Q, n);
+		mul(y, xt, _w_Q, _wi_Q, s0, n);
+		NTT_inverse8(y, _wi_Q, s0, n);
+ 		const int64_t carry = carry_sub(y, z, n, lbase, _norm);
+		carry_complete(y, carry, true, n, lbase);
 	}
 
 	// Montgomery-McLaughlin-Gallot-Woltman multiplication
 
 	void reduceMMGW(RNS * const x)
 	{
-		mul_mod_R(x, _t_R, _Ninv_R);	// m'
+		mul_mod_R(x, _Ninv_R);	// m'
 
 		x[0] = RNS(x[0].get() + 2);
-		mul_sub_mod_Q(x, x, _N_Q, _t_Q);
+		mul_sub_mod_Q(x, _N_Q, _t_Q);
 	}
 
 	void mulMMGW(RNS * const x, const RNS * const y)
 	{
 		const size_t n = size_t(1) << _ln;
-		RNS * const t = _t;
-		set(t, y, n); NTT_forward(t, _w_R, n);
-		mul_mod_R(_t_R, x, t);
-		set(t, y, n); NTT_forward(t, _w_Q, n);
-		mul_sub_mod_Q(_t_Q, x, t, nullptr);
+		set(_t, y, n); NTT_forward(_t, _w_Q, n);
+		set(_t_Q, x, n); mul_mod_Q(_t_Q, _t);
+		set(_t, y, n); NTT_forward(_t, _w_R, n);
+		mul_mod_R(x, _t);
 		reduceMMGW(x);
 	}
 
 	void squareMMGW(RNS * const x, const int32_t a)
 	{
-		square_mul_mod_R(_t_R, x, a);
 		square_mul_mod_Q(_t_Q, x, a);
+		square_mul_mod_R(x, x, a);
 		reduceMMGW(x);
 	}
 
@@ -705,15 +647,15 @@ public:
 	void set1() override
 	{
 		const size_t n = size_t(1) << _ln;
-		set(_reg[0], _one, n);
+		set(_reg[Reg0], _one, n);
 	}
 
 	void get(mpz_t & z, const size_t src) override
 	{
 		// Conversion out of Montgomery-McLaughlin-Gallot-Woltman form
 		const size_t n = size_t(1) << _ln;
-		set(_t_R, _reg[src], n);
 		set(_t_Q, _reg[src], n);
+		set(_t, _reg[src], n);
 		reduceMMGW(_t);
 		get_mpz(z, _t, n, mp_bitcnt_t(_lbase));
 
@@ -729,7 +671,7 @@ public:
 
 	void square_mul(const int32_t a) override
 	{
-		squareMMGW(_reg[0], a);
+		squareMMGW(_reg[Reg0], a);
 	}
 
 	void mul(const size_t dst, const size_t src) override
@@ -798,7 +740,7 @@ public:
 		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
 
 		_N_Q = new RNS[n]; _Ninv_R = new RNS[n]; _one = new RNS[n];
-		_t_R = new RNS[n]; _t_Q = new RNS[n];  _t = new RNS[n];
+		_t_Q = new RNS[n];  _t = new RNS[n];
 		for (size_t i = 0; i < reg_count; ++i) _reg[i] = new RNS[n];
 
 		_w_R = new RNS[n]; _wi_R = new RNS[n];
@@ -839,7 +781,7 @@ public:
 		mpz_clear(_Nz);
 
 		delete[] _N_Q; delete[] _Ninv_R; delete[] _one;
-		delete[] _t_R; delete[] _t_Q; delete[] _t;
+		delete[] _t_Q; delete[] _t;
 		for (size_t i = 0; i < reg_count; ++i) delete[] _reg[i];
 
 		delete[] _w_R; delete[] _wi_R;

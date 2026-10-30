@@ -17,10 +17,10 @@ class transformGMP : public transform
 private:
 	static const size_t reg_count = 3;
 	mp_bitcnt_t _n;
-	mpz_t _N, _Ninv, _R, _Q, _one;
-	mpz_t _t_R, _t_Q, _t;
-	mpz_t _reg[reg_count];
 	bool _init_failed = false;
+	mpz_t _N, _Ninv, _R, _Q, _one;
+	mpz_t _t_Q, _t;
+	mpz_t _reg[reg_count];
 
 private:
 	// Modular arithmetic
@@ -57,8 +57,8 @@ private:
 
 	void square_mul_mod_R(mpz_t & z, const mpz_t & x, const int32_t a)
 	{
-		mpz_mul_si(z, x, a);
-		mpz_mul(z, z, x);
+		mpz_mul(z, x, x);
+		mpz_mul_si(z, z, a);
 		mod_R(z);
 	}
 
@@ -91,7 +91,7 @@ private:
 
 	void reduceMMGW(mpz_t & x)
 	{
-		mul_mod_R(x, _t_R, _Ninv);	// m'
+		mul_mod_R(x, x, _Ninv);	// m'
 
 		mpz_add_ui(x, x, 2);
 		mul_mod_Q(x, x, _N);
@@ -100,29 +100,29 @@ private:
 
 	void mulMMGW(mpz_t & x, const mpz_t & y)
 	{
-		mul_mod_R(_t_R, x, y);
 		mul_mod_Q(_t_Q, x, y);
+		mul_mod_R(x, x, y);
 		reduceMMGW(x);
 	}
 
 	void squareMMGW(mpz_t & x, const int32_t a)
 	{
-		square_mul_mod_R(_t_R, x, a);
 		square_mul_mod_Q(_t_Q, x, a);
+		square_mul_mod_R(x, x, a);
 		reduceMMGW(x);
 	}
 
 public:
 	void set1() override
 	{
-		mpz_set(_reg[0], _one);
+		mpz_set(_reg[Reg0], _one);
 	}
 
 	void get(mpz_t & z, const size_t src) override
 	{
 		// Conversion out of Montgomery-McLaughlin-Gallot-Woltman form
-		mpz_set(_t_R, _reg[src]);
 		mpz_set(_t_Q, _reg[src]);
+		mpz_set(z, _reg[src]);
 		reduceMMGW(z);
 		// 0 <= z < mod
 		mpz_mod(z, z, _N);
@@ -135,7 +135,7 @@ public:
 
 	void square_mul(const int32_t a) override
 	{
-		squareMMGW(_reg[0], a);
+		squareMMGW(_reg[Reg0], a);
 	}
 
 	void mul(const size_t dst, const size_t src) override
@@ -152,7 +152,7 @@ public:
 public:
 	transformGMP(const mpz_t & N, const int32_t a, const bool verbose) : transform()
 	{
-		mpz_init_set(_N, N); mpz_inits(_Ninv, _R, _Q, _one, _t_R, _t_Q, _t, nullptr);
+		mpz_init_set(_N, N); mpz_inits(_Ninv, _R, _Q, _one, _t_Q, _t, nullptr);
 		for (size_t i = 0; i < reg_count; ++i) mpz_init(_reg[i]);
 
 		// R = 2^n - 1, Q = 2^n + 1 such that 2^n > 16 * a * N
@@ -176,7 +176,7 @@ public:
 
 	virtual ~transformGMP()
 	{
-		mpz_clears(_N, _Ninv, _R, _Q, _one, _t_R, _t_Q, _t, nullptr);
+		mpz_clears(_N, _Ninv, _R, _Q, _one, _t_Q, _t, nullptr);
 		for (size_t i = 0; i < reg_count; ++i) mpz_clear(_reg[i]);
 	}
 };

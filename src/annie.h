@@ -17,7 +17,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include <gmp.h>
 
 #include "transformGMP.h"
-#include "transformCPU.h"
+#include "transformGPU.h"
 #include "file.h"
 #include "timer.h"
 
@@ -38,6 +38,7 @@ private:
 	transform * _transform = nullptr;
 	std::string _checkpoint_filename;
 	int _print_range = 0, _print_i = 0;
+	bool _must_clearline = false;
 
 protected:
 	bool quitting() const
@@ -106,6 +107,7 @@ private:
 	void init_print_progress(const int i0, const int i_start)
 	{
 		_print_range = i0; _print_i = i_start;
+		_must_clearline = false;
 	}
 
 	int print_progress(const double elapsed_time, const double display_time, const int i)
@@ -117,11 +119,12 @@ private:
 		const double remaining_time = mul_time * i, expected_time = elapsed_time / percent;
 		std::cout << std::setprecision(3) << percent * 100.0 << "% done, " << timer::format_time(remaining_time)
 				<< "/" << timer::format_time(expected_time) << " remaining, " << mul_time * 1e3 << " ms/bit.        \r";
+		_must_clearline = true;
 		return dcount;
 	}
 
 	static void endline() { std::cout << std::endl; }
-	static void clearline() { std::cout << "                                                            \r" << std::flush; }
+	void clearline() { if (_must_clearline) std::cout << "                                                            \r" << std::flush; }
 
 	int _read_checkpoint(const std::string & filename, int & i, double & elapsed_time)
 	{
@@ -196,7 +199,7 @@ private:
 	}
 
 public:
-	EReturn check(const mpz_t & n, const std::string & expression, const bool verbose = true)
+	EReturn check(const mpz_t & n, const std::string & expression, const size_t device, const bool verbose = true)
 	{
 		const size_t nsize = digits(n);
 		const std::string ns = (expression.size() <= 40) ? expression : mpz_to_short_string(n);
@@ -215,7 +218,7 @@ public:
 
 		if (mpz_even_p(n) != 0)
 		{
-			if (verbose) std::cout << ns << " is composite." << std::endl;
+			if (verbose) std::cout << ns << " is even." << std::endl;
 			return EReturn::Success;
 		}
 
@@ -224,7 +227,7 @@ public:
 
 		if (verbose) std::cout << "Running Euler probable primality test of " << ns << " to base " << a << " [" << nsize << " digits]" << std::endl;
 
-		transform * const p_transform = (nsize < 80) ? (transform *)(new transformGMP(n, a, verbose)) : (transform *)(new transformCPU(n, a, verbose));
+		transform * const p_transform = (nsize < 80) ? (transform *)(new transformGMP(n, a, verbose)) : (transform *)(new transformGPU(n, a, device, verbose));
 		if (p_transform->init_failed())
 		{
 			if (verbose)
@@ -242,7 +245,9 @@ public:
 
 		_transform = p_transform;
 
-		std::ostringstream ss; ss << "a_" << nsize << ".chk";
+		long exp; const double d = mpz_get_d_2exp(&exp, n);
+		const uint64_t hash = uint64_t(d * (uint64_t(1) << 52)) * nsize + mpz_getlimbn(n, 0);
+		std::ostringstream ss; ss << "a_" << uint64_to_string(hash) << ".chk";
 		_checkpoint_filename = ss.str();
 
 		mpz_t exponent; mpz_init(exponent);
@@ -256,7 +261,7 @@ public:
 		{
 			ri = 0; restored_time = 0;
 			p_transform->set1();
-			p_transform->copy(1, 0);	// d(t)
+			p_transform->copy(transform::Reg1, transform::Reg0);	// d(t)
 		}
 		else std::cout << "Resuming from a checkpoint." << std::endl;
 
@@ -286,18 +291,18 @@ public:
 
 			if ((i % B_GL == 0) && (i / B_GL != 0))
 			{
-				p_transform->mul(1, 0);	// d(t)
+				p_transform->mul(transform::Reg1, transform::Reg0);	// d(t)
 			}
 		}
 
 		// d(t + 1) = d(t) * result
-		p_transform->copy(2, 0);
-		p_transform->mul(2, 1);
+		p_transform->copy(transform::Reg2, transform::Reg0);
+		p_transform->mul(transform::Reg2, transform::Reg1);
 
 		mpz_t t; mpz_init(t);
 
 		// result ?= -1
-		p_transform->get(t, 0);
+		p_transform->get(t, transform::Reg0);
 		mpz_add_ui(t, t, 1); if (mpz_cmp(t, n) >= 0) mpz_sub(t, t, n);
 		const bool is_prp = (mpz_sgn(t) == 0);
 
@@ -305,7 +310,7 @@ public:
 		p_transform->square_mul(1);
 
 		// 64-bit residue 
-		p_transform->get(t, 0);
+		p_transform->get(t, transform::Reg0);
 		const uint64_t res64 = (mpz_size(t) != 0) ? uint64_t(mpz_getlimbn(t, 0)) : uint64_t(0);
 
 		mpz_t res; mpz_init_set_ui(res, 0);
@@ -328,7 +333,7 @@ public:
 		}
 
 		// a^{res - 2^B} * d(t)
-		p_transform->mul(0, 1);
+		p_transform->mul(transform::Reg0, transform::Reg1);
 
 		// (a^{res - 2^B} * d(t))^2^B = a^res * d(t)^{2^B}
 		for (int i = B_GL - 1; i >= 0; --i)
@@ -341,8 +346,8 @@ public:
 
 		// d(t)^{2^B} * a^res ?= d(t + 1)
 		mpz_t r1, r2; mpz_inits(r1, r2, nullptr);
-		p_transform->get(r1, 0);
-		p_transform->get(r2, 2);
+		p_transform->get(r1, transform::Reg0);
+		p_transform->get(r2, transform::Reg2);
 		const bool success = (mpz_cmp(r1, r2) == 0);
 		mpz_clears(r1, r2, nullptr);
 

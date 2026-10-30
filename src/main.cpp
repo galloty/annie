@@ -13,6 +13,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include <fstream>
 #include <stdexcept>
 #include <vector>
+#include <array>
 
 #if defined(_WIN64)
 #include <Windows.h>
@@ -25,6 +26,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include <gmp.h>
 
 #include "annie.h"
+#include "ocl.h"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wsign-conversion"
@@ -153,15 +155,17 @@ public:
 		_instance = new annie();
 
 		mpz_t n; mpz_init(n);
-		// 3, 4, 5, 7, 11, 13, 17, 23, 29, 43, 47, 83, 131, 137, 359, 431, 433, 449, 509, 569, 571, 2971, 4723, 5387,
-		// 9311, 9677, 14431, 25561, 30757, 35999, 37511, 50833, 81839, 104911, 130021, 148091, 201107
-		for (unsigned long j = 3; j <= 5388; ++j)
+		// static const std::array<unsigned long, 37> fib_p = { 3, 4, 5, 7, 11, 13, 17, 23, 29, 43, 47, 83, 131, 137, 359, 431, 433, 449, 509, 569, 571, 2971, 4723, 5387,
+		// 	9311, 9677, 14431, 25561, 30757, 35999, 37511, 50833, 81839, 104911, 130021, 148091, 201107 };
+		static const std::array<unsigned long, 27> fib = { 3, 4, 5, 7, 11, 13, 17, 23, 29, 43, 47, 83, 131, 137, 359, 431, 802, 1601, 2971, 5387, 9311, 9677, 14431, 25561, 30757, 35999, 37511 };	// 2000003
+		// for (unsigned long j = 3; j <= 5388; ++j)
+		for (const auto j : fib)
 		{
-			const unsigned long i = (j == 5388) ? 50833 : j;
+			const unsigned long i = j;	//(j == 5388) ? 50833 : j;
 			const std::string expression = "fibonacci(" + std::to_string(i) + ")";
 			mpz_fib_ui(n, i);
 
-			const annie::EReturn ret = _instance->check(n, expression, (j < 5) || (j == 5388));
+			const annie::EReturn ret = _instance->check(n, expression, 0);	//, (j < 5) || (j == 5388));
 			if (ret != annie::EReturn::Success)
 			{
 				if (ret == annie::EReturn::Failed) std::cout << expression << ": validation failed!";
@@ -172,7 +176,7 @@ public:
 		}
 		mpz_clear(n);
 #else
-		std::string expression = "167!-1", filename;	// DC2EBAF7065DD7D2, 166!-1 is prime
+		std::string expression, filename;
 		size_t device = 0;
 
 		// parse args
@@ -208,6 +212,8 @@ public:
 		if (expression.empty())
 		{
 			std::cout << usage();
+			platform pfm;
+			if (pfm.displayDevices() == 0) throw std::runtime_error("No OpenCL device");
 			return;
 		}
 
@@ -232,7 +238,7 @@ public:
 		mpz_t n; mpz_init_set_str(n, n_str.c_str(), 10);
 
 		_instance = new annie();
-		const annie::EReturn ret = _instance->check(n, expression);
+		const annie::EReturn ret = _instance->check(n, expression, device);
 		mpz_clear(n);
 
 		if (ret == annie::EReturn::Failed) std::cout << "Validation failed!";
