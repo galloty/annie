@@ -17,14 +17,15 @@ typedef cl_int		int32;
 typedef cl_ulong	uint64;
 typedef cl_long		int64;
 
-#define	CARRY_LENGTH	4
+#define	CARRY_LENGTH	4u
 
 #define CREATE_KERNEL(name) _##name = create_kernel(#name);
 
 class engine : public device
 {
 private:
-	const int _ln = 0;
+	const int _ln;
+	const int _carry_shift;
 
 	cl_mem _reg, _carry;
 
@@ -38,9 +39,15 @@ private:
 
 	std::vector<cl_kernel> _kernels;
 
+	static constexpr int ilog2_32(const uint32_t n) { return (n == 0) ? -1 : (31 - __builtin_clz(n)); }
+
 public:
-	engine(const int ln, const size_t device_id) : device(platform(), device_id), _ln(ln) {}
+	engine(const int ln, const size_t device_id) : device(platform(), device_id), _ln(ln),
+		_carry_shift(ilog2_32(uint32_t(std::min((size_t(1) << ln) / CARRY_LENGTH, std::min(size_t(256), getMaxWorkGroupSize()))))) {}
 	virtual ~engine() {}
+
+	int get_carry_shift() const { return _carry_shift; }
+	size_t get_carry_workgroup_size() const { return (size_t(1) << _carry_shift); }
 
 ///////////////////////////////
 
@@ -251,7 +258,7 @@ public:
 		_setKernelArg(_carry_mul, 1, sizeof(cl_mem), &_carry);
 		_setKernelArg(_carry_mul, 2, sizeof(uint32), &rx);
 		_setKernelArg(_carry_mul, 3, sizeof(int32), &a);
-		_executeKernel(_carry_mul, (1u << _ln) / CARRY_LENGTH);
+		_executeKernel(_carry_mul, (1u << _ln) / CARRY_LENGTH, 1u << _carry_shift);
 	}
 
 	void carry_sub(const size_t reg_x, const size_t reg_y)
@@ -260,7 +267,7 @@ public:
 		_setKernelArg(_carry_sub, 1, sizeof(cl_mem), &_carry);
 		_setKernelArg(_carry_sub, 2, sizeof(uint32), &rx);
 		_setKernelArg(_carry_sub, 3, sizeof(uint32), &ry);
-		_executeKernel(_carry_sub, (1u << _ln) / CARRY_LENGTH);
+		_executeKernel(_carry_sub, (1u << _ln) / CARRY_LENGTH, 1u << _carry_shift);
 	}
 
 	void carry_complete(const size_t reg_x, const bool nega)
@@ -269,7 +276,7 @@ public:
 		_setKernelArg(_carry_complete, 1, sizeof(cl_mem), &_carry);
 		_setKernelArg(_carry_complete, 2, sizeof(uint32), &rx);
 		_setKernelArg(_carry_complete, 3, sizeof(int32), &is_nega);
-		_executeKernel(_carry_complete, (1u << _ln) / CARRY_LENGTH);
+		_executeKernel(_carry_complete, ((1u << _ln) / CARRY_LENGTH) >> _carry_shift);	// TODO log2
 	}
 
 	void mod_Q(const size_t reg_x)

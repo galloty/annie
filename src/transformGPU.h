@@ -129,9 +129,7 @@ private:
 	bool _init_failed = false;
 	mpz_t _Nz;
 	engine * _engine = nullptr;
-	int64 * _carry = nullptr;
 	RNS * _buf = nullptr;
-	RNS * _reg = nullptr;
 
 private:
 	static constexpr size_t bitrev(const size_t i, const size_t n)
@@ -231,10 +229,10 @@ private:
 	{
 		engine * const eng = _engine;
 
+		int lm = _ln - 3; size_t s = 1;
 		eng->forward8_0(reg_x, reg_w);
 
-		int lm = _ln - 6; size_t s = 8;
-		for (; lm > 0; lm -= 3, s *= 8) eng->forward8(reg_x, reg_w, lm, s);
+		for (lm -= 3, s *= 8; lm > 0; lm -= 3, s *= 8) eng->forward8(reg_x, reg_w, lm, s);
 	}
 
 	void NTT_inverse8(const size_t reg_x, const size_t reg_w)
@@ -256,18 +254,32 @@ private:
 
 	void square(const size_t reg_x, const size_t reg_w)
 	{
+		NTT_forward8(reg_x, reg_w);
+
 		const int lm0 = _lm0;
 		if (lm0 == 3) _engine->square8(reg_x, reg_w);
 		else if (lm0 == 2) _engine->square4x2(reg_x, reg_w);
 		else if (lm0 == 1) _engine->square2x4(reg_x, reg_w);
+
+		NTT_inverse8(reg_x, reg_w);
 	}
 
-	void mul(const size_t reg_y, const size_t reg_x, const size_t reg_w)
+	void mul_const(const size_t reg_y, const size_t reg_x, const size_t reg_w)
 	{
+		NTT_forward8(reg_y, reg_w);
+
 		const int lm0 = _lm0;
 		if (lm0 == 3) _engine->mul8(reg_y, reg_x, reg_w);
 		else if (lm0 == 2) _engine->mul4x2(reg_y, reg_x, reg_w);
 		else if (lm0 == 1) _engine->mul2x4(reg_y, reg_x, reg_w);
+
+		NTT_inverse8(reg_y, reg_w);
+	}
+
+	void mul(const size_t reg_y, const size_t reg_x, const size_t reg_w)
+	{
+		NTT_forward(reg_x, reg_w);
+		mul_const(reg_y, reg_x, reg_w);
 	}
 
 	void carry_mul(const size_t reg_x, const int32 a, const bool nega)
@@ -294,39 +306,31 @@ private:
 	void reduceMMGW(const size_t dst)
 	{
 		// m' = t_R * Ninv mod R (dst = t_R)
-		NTT_forward8(dst, Reg_w_R);
-		mul(dst, Reg_Ninv_R, Reg_w_R);
-		NTT_inverse8(dst, Reg_w_R);
+		mul_const(dst, Reg_Ninv_R, Reg_w_R);
  		carry_mul(dst, 1, false);
 
-		// m' += 2
+		// 0 <= m' < R is a necessary condition, m' += 2
 		mod_R_add2(dst);
 
 		// x = x * N_Q - t_Q mod Q
-		NTT_forward8(dst, Reg_w_Q);
-		mul(dst, Reg_N_Q, Reg_w_Q);
-		NTT_inverse8(dst, Reg_w_Q);
+		mul_const(dst, Reg_N_Q, Reg_w_Q);
  		carry_sub(dst, Reg_t_Q, true);
+
+		// 0 <= dst < Q is a necessary condition
 		mod_Q(dst);
 	}
 
 	void mulMMGW(const size_t dst, const size_t src)
 	{
 		// t_Q = x * y mod Q
-		set(Reg_t, dst);
-		NTT_forward(Reg_t, Reg_w_Q);
-		set(Reg_t_Q, src);
-		NTT_forward8(Reg_t_Q, Reg_w_Q);
+		set(Reg_t_Q, dst);
+		set(Reg_t, src);
 		mul(Reg_t_Q, Reg_t, Reg_w_Q);
-		NTT_inverse8(Reg_t_Q, Reg_w_Q);
  		carry_mul(Reg_t_Q, 1, true);
 
 		// dst = x * y mod R
 		set(Reg_t, src);
-		NTT_forward(Reg_t, Reg_w_R);
-		NTT_forward8(dst, Reg_w_R);
 		mul(dst, Reg_t, Reg_w_R);
-		NTT_inverse8(dst, Reg_w_R);
  		carry_mul(dst, 1, false);
 
 		reduceMMGW(dst);
@@ -336,15 +340,11 @@ private:
 	{
 		// t_Q = a * x^2 mod Q
 		set(Reg_t_Q, Reg0);
-		NTT_forward8(Reg_t_Q, Reg_w_Q);
 		square(Reg_t_Q, Reg_w_Q);
-		NTT_inverse8(Reg_t_Q, Reg_w_Q);
  		carry_mul(Reg_t_Q, a, true);
 
 		// Reg0 = a * x^2 mod R
-		NTT_forward8(Reg0, Reg_w_R);
 		square(Reg0, Reg_w_R);
-		NTT_inverse8(Reg0, Reg_w_R);
  		carry_mul(Reg0, a, false);
 
 		reduceMMGW(Reg0);
@@ -365,7 +365,7 @@ public:
 		reduceMMGW(Reg_t);
 		get_mpz(z, Reg_t);
 
-		// 0 <= z < mod
+		// 0 <= z < N
 		mpz_mod(z, z, _Nz);
 	}
 
@@ -436,9 +436,7 @@ public:
 		const size_t n = size_t(1) << ln;
 		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
 
-		_carry = new int64[n];
 		_buf = new RNS[2 * n];
-		_reg = new RNS[reg_count * n];
 
 		mpz_set_ui(R, 1); mpz_mul_2exp(R, R, lbase << ln); mpz_sub_ui(R, R, 1);
 		if (mpz_invert(t, N, R) == 0)
@@ -474,7 +472,9 @@ public:
 		src << "#define NORM2\t" << _norm.get_r2().get() << "u" << std::endl;
 
 		src << "#define CARRY_LENGTH\t" << CARRY_LENGTH << "u"  << std::endl;
+		src << "#define CARRY_WG_SZ\t" << _engine->get_carry_workgroup_size() << "u" << std::endl;
 
+// std::cout << src.str() << std::endl;
 		if (!eng->readOpenCL("ocl/kernel.cl", "src/ocl/kernel.h", "src_ocl_kernel", src)) src << src_ocl_kernel;
 
 		eng->loadProgram(src.str());
@@ -509,8 +509,6 @@ public:
 		_engine->clearProgram();
 		delete _engine;
 
-		delete[] _carry;
 		delete[] _buf;
-		delete[] _reg;
 	}
 };

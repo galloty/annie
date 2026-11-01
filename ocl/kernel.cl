@@ -29,6 +29,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define NORM1			4194176001u
 #define NORM2			4076739073u
 #define CARRY_LENGTH	4u
+#define CARRY_WG_SZ     256u
 #endif
 #define BASE			(1u << LBASE)
 
@@ -409,32 +410,28 @@ INLINE int_64 garner2(const RNS r)
 	return (int_64)(n - (b ? P1P2 : 0));
 }
 
-__kernel
-void carry_mul(__global RNS * restrict const reg, __global int_64 * restrict const carry, const uint_32 reg_x, const int_32 a)
+INLINE void carry_mul_1(const __global RNS * restrict const xi, __global int_64 * restrict const carry,
+	__local int_64 * const cl, uint_32 r[CARRY_LENGTH], const sz_t id, const int_32 a)
 {
-	const sz_t id = (sz_t)get_global_id(0);
-	__global RNS * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];
-
 	int_64 f = 0;
 	for (sz_t j = 0; j < CARRY_LENGTH; ++j)
 	{
 		// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF
 		const RNS u = mulmod(xi[j], (RNS)(NORM1, NORM2));
 		f += a * garner2(u);
-		const uint_32 r = (uint_32)(f) & (BASE - 1);
-		xi[j] = (RNS)(r, r);
+		r[j] = (uint_32)(f) & (BASE - 1);
 		f >>= LBASE;
 	}
-	carry[id] = f;
+
+	const sz_t lid = id % CARRY_WG_SZ;
+	cl[lid] = f;
+
+	if (lid == CARRY_WG_SZ - 1) carry[id / CARRY_WG_SZ] = f;
 }
 
-__kernel
-void carry_sub(__global RNS * restrict const reg, __global int_64 * restrict const carry, const uint_32 reg_x, const uint_32 reg_y)
+INLINE void carry_sub_1(const __global RNS * restrict const xi, __global const RNS * restrict const yi, __global int_64 * restrict const carry,
+	__local int_64 * const cl, uint_32 r[CARRY_LENGTH], const sz_t id)
 {
-	const sz_t id = (sz_t)get_global_id(0);
-	__global RNS * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];
-	__global const RNS * restrict const yi = &reg[reg_y * N_SZ + CARRY_LENGTH * id];
-
 	int_64 f = 0;
 	for (sz_t j = 0; j < CARRY_LENGTH; ++j)
 	{
@@ -442,20 +439,69 @@ void carry_sub(__global RNS * restrict const reg, __global int_64 * restrict con
 		const RNS u = mulmod(xi[j], (RNS)(NORM1, NORM2));
 		f += garner2(u);
 		f -= get_int(yi[j]);
-		const uint_32 r = (uint_32)(f) & (BASE - 1);
-		xi[j] = (RNS)(r, r);
+		r[j] = (uint_32)(f) & (BASE - 1);
 		f >>= LBASE;
 	}
-	carry[id] = f;
+
+	const sz_t lid = id % CARRY_WG_SZ;
+	cl[lid] = f;
+
+	if (lid == CARRY_WG_SZ - 1) carry[id / CARRY_WG_SZ] = f;
+}
+
+INLINE void carry_2(__global RNS * restrict const xi, const __local int_64 * const cl,
+	uint_32 r[CARRY_LENGTH], const sz_t id)
+{
+	const sz_t lid = id % CARRY_WG_SZ;
+	int_64 f = (lid != 0) ? cl[lid - 1] : (int_64)(0);
+
+	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)
+	{
+		f += (int_64)(r[j]);
+		r[j] = (uint_32)(f) & (BASE - 1);
+		f >>= LBASE;
+		if (f == 0) break;
+	}
+
+	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j) xi[j] = (RNS)(r[j], r[j]);
+	f += (int_64)(r[CARRY_LENGTH - 1]);
+	xi[CARRY_LENGTH - 1] = set_int((int_32)f);
+}
+
+__kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))
+void carry_mul(__global RNS * restrict const reg, __global int_64 * restrict const carry, const uint_32 reg_x, const int_32 a)
+{
+	const sz_t id = (sz_t)get_global_id(0);
+	__global RNS * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];
+	__local int_64 cl[CARRY_WG_SZ];
+	uint_32 r[CARRY_LENGTH];
+
+	carry_mul_1(xi, carry, cl, r, id, a);
+	barrier(CLK_LOCAL_MEM_FENCE);
+	carry_2(xi, cl, r, id);
+}
+
+__kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))
+void carry_sub(__global RNS * restrict const reg, __global int_64 * restrict const carry, const uint_32 reg_x, const uint_32 reg_y)
+{
+	const sz_t id = (sz_t)get_global_id(0);
+	__global RNS * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];
+	__global const RNS * restrict const yi = &reg[reg_y * N_SZ + CARRY_LENGTH * id];
+	__local int_64 cl[CARRY_WG_SZ];
+	uint_32 r[CARRY_LENGTH];
+
+	carry_sub_1(xi, yi, carry, cl, r, id);
+	barrier(CLK_LOCAL_MEM_FENCE);
+	carry_2(xi, cl, r, id);
 }
 
 __kernel
 void carry_complete(__global RNS * restrict const reg, __global const int_64 * restrict const carry, const uint_32 reg_x, const int_32 is_nega)
 {
 	const sz_t id = (sz_t)get_global_id(0);
-	__global RNS * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];
+	__global RNS * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * CARRY_WG_SZ * id];
 
-	int_64 f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH) : id) - 1];
+	int_64 f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];
 	if ((id == 0) && (is_nega != 0)) f = -f;
 
 	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)

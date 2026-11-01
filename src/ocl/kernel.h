@@ -41,6 +41,7 @@ static const char * const src_ocl_kernel = \
 "#define NORM1			4194176001u\n" \
 "#define NORM2			4076739073u\n" \
 "#define CARRY_LENGTH	4u\n" \
+"#define CARRY_WG_SZ     256u\n" \
 "#endif\n" \
 "#define BASE			(1u << LBASE)\n" \
 "\n" \
@@ -421,32 +422,28 @@ static const char * const src_ocl_kernel = \
 "	return (int_64)(n - (b ? P1P2 : 0));\n" \
 "}\n" \
 "\n" \
-"__kernel\n" \
-"void carry_mul(__global RNS * restrict const reg, __global int_64 * restrict const carry, const uint_32 reg_x, const int_32 a)\n" \
+"INLINE void carry_mul_1(const __global RNS * restrict const xi, __global int_64 * restrict const carry,\n" \
+"	__local int_64 * const cl, uint_32 r[CARRY_LENGTH], const sz_t id, const int_32 a)\n" \
 "{\n" \
-"	const sz_t id = (sz_t)get_global_id(0);\n" \
-"	__global RNS * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];\n" \
-"\n" \
 "	int_64 f = 0;\n" \
 "	for (sz_t j = 0; j < CARRY_LENGTH; ++j)\n" \
 "	{\n" \
 "		// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF\n" \
 "		const RNS u = mulmod(xi[j], (RNS)(NORM1, NORM2));\n" \
 "		f += a * garner2(u);\n" \
-"		const uint_32 r = (uint_32)(f) & (BASE - 1);\n" \
-"		xi[j] = (RNS)(r, r);\n" \
+"		r[j] = (uint_32)(f) & (BASE - 1);\n" \
 "		f >>= LBASE;\n" \
 "	}\n" \
-"	carry[id] = f;\n" \
+"\n" \
+"	const sz_t lid = id % CARRY_WG_SZ;\n" \
+"	cl[lid] = f;\n" \
+"\n" \
+"	if (lid == CARRY_WG_SZ - 1) carry[id / CARRY_WG_SZ] = f;\n" \
 "}\n" \
 "\n" \
-"__kernel\n" \
-"void carry_sub(__global RNS * restrict const reg, __global int_64 * restrict const carry, const uint_32 reg_x, const uint_32 reg_y)\n" \
+"INLINE void carry_sub_1(const __global RNS * restrict const xi, __global const RNS * restrict const yi, __global int_64 * restrict const carry,\n" \
+"	__local int_64 * const cl, uint_32 r[CARRY_LENGTH], const sz_t id)\n" \
 "{\n" \
-"	const sz_t id = (sz_t)get_global_id(0);\n" \
-"	__global RNS * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];\n" \
-"	__global const RNS * restrict const yi = &reg[reg_y * N_SZ + CARRY_LENGTH * id];\n" \
-"\n" \
 "	int_64 f = 0;\n" \
 "	for (sz_t j = 0; j < CARRY_LENGTH; ++j)\n" \
 "	{\n" \
@@ -454,20 +451,69 @@ static const char * const src_ocl_kernel = \
 "		const RNS u = mulmod(xi[j], (RNS)(NORM1, NORM2));\n" \
 "		f += garner2(u);\n" \
 "		f -= get_int(yi[j]);\n" \
-"		const uint_32 r = (uint_32)(f) & (BASE - 1);\n" \
-"		xi[j] = (RNS)(r, r);\n" \
+"		r[j] = (uint_32)(f) & (BASE - 1);\n" \
 "		f >>= LBASE;\n" \
 "	}\n" \
-"	carry[id] = f;\n" \
+"\n" \
+"	const sz_t lid = id % CARRY_WG_SZ;\n" \
+"	cl[lid] = f;\n" \
+"\n" \
+"	if (lid == CARRY_WG_SZ - 1) carry[id / CARRY_WG_SZ] = f;\n" \
+"}\n" \
+"\n" \
+"INLINE void carry_2(__global RNS * restrict const xi, const __local int_64 * const cl,\n" \
+"	uint_32 r[CARRY_LENGTH], const sz_t id)\n" \
+"{\n" \
+"	const sz_t lid = id % CARRY_WG_SZ;\n" \
+"	int_64 f = (lid != 0) ? cl[lid - 1] : (int_64)(0);\n" \
+"\n" \
+"	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
+"	{\n" \
+"		f += (int_64)(r[j]);\n" \
+"		r[j] = (uint_32)(f) & (BASE - 1);\n" \
+"		f >>= LBASE;\n" \
+"		if (f == 0) break;\n" \
+"	}\n" \
+"\n" \
+"	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j) xi[j] = (RNS)(r[j], r[j]);\n" \
+"	f += (int_64)(r[CARRY_LENGTH - 1]);\n" \
+"	xi[CARRY_LENGTH - 1] = set_int((int_32)f);\n" \
+"}\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))\n" \
+"void carry_mul(__global RNS * restrict const reg, __global int_64 * restrict const carry, const uint_32 reg_x, const int_32 a)\n" \
+"{\n" \
+"	const sz_t id = (sz_t)get_global_id(0);\n" \
+"	__global RNS * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];\n" \
+"	__local int_64 cl[CARRY_WG_SZ];\n" \
+"	uint_32 r[CARRY_LENGTH];\n" \
+"\n" \
+"	carry_mul_1(xi, carry, cl, r, id, a);\n" \
+"	barrier(CLK_LOCAL_MEM_FENCE);\n" \
+"	carry_2(xi, cl, r, id);\n" \
+"}\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))\n" \
+"void carry_sub(__global RNS * restrict const reg, __global int_64 * restrict const carry, const uint_32 reg_x, const uint_32 reg_y)\n" \
+"{\n" \
+"	const sz_t id = (sz_t)get_global_id(0);\n" \
+"	__global RNS * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];\n" \
+"	__global const RNS * restrict const yi = &reg[reg_y * N_SZ + CARRY_LENGTH * id];\n" \
+"	__local int_64 cl[CARRY_WG_SZ];\n" \
+"	uint_32 r[CARRY_LENGTH];\n" \
+"\n" \
+"	carry_sub_1(xi, yi, carry, cl, r, id);\n" \
+"	barrier(CLK_LOCAL_MEM_FENCE);\n" \
+"	carry_2(xi, cl, r, id);\n" \
 "}\n" \
 "\n" \
 "__kernel\n" \
 "void carry_complete(__global RNS * restrict const reg, __global const int_64 * restrict const carry, const uint_32 reg_x, const int_32 is_nega)\n" \
 "{\n" \
 "	const sz_t id = (sz_t)get_global_id(0);\n" \
-"	__global RNS * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];\n" \
+"	__global RNS * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * CARRY_WG_SZ * id];\n" \
 "\n" \
-"	int_64 f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH) : id) - 1];\n" \
+"	int_64 f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];\n" \
 "	if ((id == 0) && (is_nega != 0)) f = -f;\n" \
 "\n" \
 "	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
