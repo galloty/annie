@@ -17,6 +17,16 @@ typedef cl_int		int32;
 typedef cl_ulong	uint64;
 typedef cl_long		int64;
 
+class ZP
+{
+protected:
+	uint32 _n;
+
+public:
+	ZP() {}
+	explicit ZP(const uint32 n) : _n(n) {}
+};
+
 #define	CARRY_LENGTH	4u
 
 #define CREATE_KERNEL(name) _##name = create_kernel(#name);
@@ -35,7 +45,7 @@ private:
 	cl_kernel _fwd4x2 = nullptr, _fwd8 = nullptr;
 	cl_kernel _carry_mul = nullptr, _carry_sub = nullptr, _carry_complete = nullptr;
 	cl_kernel _mod_Q = nullptr, _mod_R_add2 = nullptr;
-	cl_kernel _set = nullptr;
+	cl_kernel _set = nullptr, _extend = nullptr;
 
 	std::vector<cl_kernel> _kernels;
 
@@ -60,7 +70,7 @@ public:
 		const size_t n = size_t(1) << _ln;
 		if (_ln != 0)
 		{
-			const size_t size = 2 * n * sizeof(uint32);
+			const size_t size = 2 * n * sizeof(ZP);
 			const size_t mem_size = reg_count * size;
 			if (getMaxMemAllocSize() < mem_size)
 			{
@@ -124,6 +134,7 @@ public:
 		CREATE_KERNEL(mod_R_add2);
 
 		CREATE_KERNEL(set);
+		CREATE_KERNEL(extend);
 	}
 
 	void release_kernels()
@@ -138,17 +149,17 @@ public:
 ///////////////////////////////
 
 public:
-	void read_memory(const size_t reg_i, void * const ptr, const size_t count = 1)
+	void read_memory(const size_t reg_i, ZP * const ptr, const size_t count = 1)
 	{
 		const size_t n = size_t(1) << _ln;
-		const size_t size = 2 * n * sizeof(uint32);
+		const size_t size = n * sizeof(ZP);
 		_readBuffer(_reg, ptr, count * size, reg_i * size);
 	}
 
-	void write_memory(const size_t reg_i, const void * const ptr, const size_t count = 1)
+	void write_memory(const size_t reg_i, const ZP * const ptr, const size_t count = 1)
 	{
 		const size_t n = size_t(1) << _ln;
-		const size_t size = 2 * n * sizeof(uint32);
+		const size_t size = n * sizeof(ZP);
 		_writeBuffer(_reg, ptr, count * size, reg_i * size);
 	}
 
@@ -163,7 +174,7 @@ public:
 		_setKernelArg(_forward8, 2, sizeof(uint32), &rw);
 		_setKernelArg(_forward8, 3, sizeof(int32), &lm32);
 		_setKernelArg(_forward8, 4, sizeof(uint32), &s32);
-		_executeKernel(_forward8, 1u << (_ln - 3));
+		_executeKernel(_forward8, 2u << (_ln - 3));
 	}
 
 	void backward8(const size_t reg_x, const size_t reg_w, const int lm, const size_t s)
@@ -174,7 +185,7 @@ public:
 		_setKernelArg(_backward8, 2, sizeof(uint32), &rw);
 		_setKernelArg(_backward8, 3, sizeof(int32), &lm32);
 		_setKernelArg(_backward8, 4, sizeof(uint32), &s32);
-		_executeKernel(_backward8, 1u << (_ln - 3));
+		_executeKernel(_backward8, 2u << (_ln - 3));
 	}
 
 	void forward8_0(const size_t reg_x, const size_t reg_w)
@@ -182,7 +193,7 @@ public:
 		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
 		_setKernelArg(_forward8_0, 1, sizeof(uint32), &rx);
 		_setKernelArg(_forward8_0, 2, sizeof(uint32), &rw);
-		_executeKernel(_forward8_0, 1u << (_ln - 3));
+		_executeKernel(_forward8_0, 2u << (_ln - 3));
 	}
 
 	void square2x4(const size_t reg_x, const size_t reg_w)
@@ -190,7 +201,7 @@ public:
 		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
 		_setKernelArg(_square2x4, 1, sizeof(uint32), &rx);
 		_setKernelArg(_square2x4, 2, sizeof(uint32), &rw);
-		_executeKernel(_square2x4, 1u << (_ln - 3));
+		_executeKernel(_square2x4, 2u << (_ln - 3));
 	}
 
 	void square4x2(const size_t reg_x, const size_t reg_w)
@@ -198,7 +209,7 @@ public:
 		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
 		_setKernelArg(_square4x2, 1, sizeof(uint32), &rx);
 		_setKernelArg(_square4x2, 2, sizeof(uint32), &rw);
-		_executeKernel(_square4x2, 1u << (_ln - 3));
+		_executeKernel(_square4x2, 2u << (_ln - 3));
 	}
 
 	void square8(const size_t reg_x, const size_t reg_w)
@@ -206,7 +217,7 @@ public:
 		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
 		_setKernelArg(_square8, 1, sizeof(uint32), &rx);
 		_setKernelArg(_square8, 2, sizeof(uint32), &rw);
-		_executeKernel(_square8, 1u << (_ln - 3));
+		_executeKernel(_square8, 2u << (_ln - 3));
 	}
 
 	void mul2x4(const size_t reg_x, const size_t reg_xp, const size_t reg_w)
@@ -215,7 +226,7 @@ public:
 		_setKernelArg(_mul2x4, 1, sizeof(uint32), &rx);
 		_setKernelArg(_mul2x4, 2, sizeof(uint32), &rxp);
 		_setKernelArg(_mul2x4, 3, sizeof(uint32), &rw);
-		_executeKernel(_mul2x4, 1u << (_ln - 3));
+		_executeKernel(_mul2x4, 2u << (_ln - 3));
 	}
 
 	void mul4x2(const size_t reg_x, const size_t reg_xp, const size_t reg_w)
@@ -224,7 +235,7 @@ public:
 		_setKernelArg(_mul4x2, 1, sizeof(uint32), &rx);
 		_setKernelArg(_mul4x2, 2, sizeof(uint32), &rxp);
 		_setKernelArg(_mul4x2, 3, sizeof(uint32), &rw);
-		_executeKernel(_mul4x2, 1u << (_ln - 3));
+		_executeKernel(_mul4x2, 2u << (_ln - 3));
 	}
 
 	void mul8(const size_t reg_x, const size_t reg_xp, const size_t reg_w)
@@ -233,7 +244,7 @@ public:
 		_setKernelArg(_mul8, 1, sizeof(uint32), &rx);
 		_setKernelArg(_mul8, 2, sizeof(uint32), &rxp);
 		_setKernelArg(_mul8, 3, sizeof(uint32), &rw);
-		_executeKernel(_mul8, 1u << (_ln - 3));
+		_executeKernel(_mul8, 2u << (_ln - 3));
 	}
 
 	void fwd4x2(const size_t reg_x, const size_t reg_w)
@@ -241,7 +252,7 @@ public:
 		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
 		_setKernelArg(_fwd4x2, 1, sizeof(uint32), &rx);
 		_setKernelArg(_fwd4x2, 2, sizeof(uint32), &rw);
-		_executeKernel(_fwd4x2, 1u << (_ln - 3));
+		_executeKernel(_fwd4x2, 2u << (_ln - 3));
  	}
 
 	void fwd8(const size_t reg_x, const size_t reg_w)
@@ -249,7 +260,7 @@ public:
 		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
 		_setKernelArg(_fwd8, 1, sizeof(uint32), &rx);
 		_setKernelArg(_fwd8, 2, sizeof(uint32), &rw);
-		_executeKernel(_fwd8, 1u << (_ln - 3));
+		_executeKernel(_fwd8, 2u << (_ln - 3));
 	}
 
 	void carry_mul(const size_t reg_x, const int32 a)
@@ -276,7 +287,7 @@ public:
 		_setKernelArg(_carry_complete, 1, sizeof(cl_mem), &_carry);
 		_setKernelArg(_carry_complete, 2, sizeof(uint32), &rx);
 		_setKernelArg(_carry_complete, 3, sizeof(int32), &is_nega);
-		_executeKernel(_carry_complete, ((1u << _ln) / CARRY_LENGTH) >> _carry_shift);	// TODO log2
+		_executeKernel(_carry_complete, ((1u << _ln) / CARRY_LENGTH) >> _carry_shift);
 	}
 
 	void mod_Q(const size_t reg_x)
@@ -299,6 +310,11 @@ public:
 		const uint32 ry = uint32(reg_y), rx = uint32(reg_x);
 		_setKernelArg(_set, 1, sizeof(uint32), &ry);
 		_setKernelArg(_set, 2, sizeof(uint32), &rx);
-		_executeKernel(_set, 1 << _ln);
+		_executeKernel(_set, 1u << (_ln - 2));
+	}
+
+	void extend01()
+	{
+		_executeKernel(_extend, 2u << (_ln - 2));	// Reg0 & Reg1
 	}
 };

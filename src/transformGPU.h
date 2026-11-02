@@ -17,11 +17,8 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 // The prime finite field Z/PZ
 template<uint32 P, uint32 Q, uint32 MR, uint32 RSQ, uint32 MPR>
-class ZPT
+class ZPT : public ZP
 {
-private:
-	uint32 _n;
-
 private:
 	static uint32 _add(const uint32 a, const uint32 b) { return a + b - ((a >= P - b) ? P : 0); }
 	static uint32 _sub(const uint32 a, const uint32 b) { return a - b + ((a < b) ? P : 0); }
@@ -34,6 +31,15 @@ private:
 		const uint32 mp = uint32(((lo * Q) * uint64(P)) >> 32);
 		return _sub(hi, mp);
 	}
+
+	static ZPT one() { return ZPT(MR); }
+
+	// Conversion into / out of Montgomery form
+	ZPT toMonty() const { return ZPT(_mul(_n, RSQ)); }
+	// ZPT fromMonty() const { return ZPT(_mul(_n, 1)); }
+
+	ZPT & operator*=(const ZPT & rhs) { _n = _mul(_n, rhs._n); return *this; }
+	ZPT operator*(const ZPT & rhs) const { ZPT r = *this; r *= rhs; return r; }
 
 	ZPT pow(const uint64 e) const
 	{
@@ -48,24 +54,71 @@ private:
 		return r;
 	}
 
+	ZPT invert() const { return pow(P - 2); }
+	static ZPT primroot_n(const int ln) { return ZPT(MPR).pow((P - 1) >> ln); }
+
+	static constexpr size_t bitrev(const size_t i, const size_t n)
+	{
+		size_t r = 0;
+		for (size_t k = n, j = i; k > 1; k /= 2, j /= 2) r = (2 * r) | (j % 2);
+		return r;
+	}
+
 public:
 	ZPT() {}
-	explicit ZPT(const uint32 n) : _n(n) {}
-
-	static ZPT one() { return ZPT(MR); }
+	explicit ZPT(const ZP & n) : ZP(n) {}
+	explicit ZPT(const uint32 n) : ZP(n) {}
 
 	uint32 get() const { return _n; }
 	int32 get_int() const { return int32(_n - ((_n >= P / 2) ? P : 0)); }
 
-	// Conversion into / out of Montgomery form
-	ZPT toMonty() const { return ZPT(_mul(_n, RSQ)); }
-	// ZPT fromMonty() const { return ZPT(_mul(_n, 1)); }
-
-	ZPT & operator*=(const ZPT & rhs) { _n = _mul(_n, rhs._n); return *this; }
-
-	ZPT invert() const { return pow(P - 2); }
-	static ZPT primroot_n(const int ln) { return ZPT(MPR).pow((P - 1) >> ln); }
 	static ZPT norm(const int ln) { return ZPT(P - ((P - 1) >> ln)); }
+
+	// modulo x^n - 1
+	static void set_roots_R(ZP * const w_R, ZP * const wi_R, const int ln)
+	{
+		const size_t n = size_t(1) << ln;
+
+		ZPT sr_s = primroot_n(ln - 1), sr_si = sr_s.invert();	// (-1)^{1/s}
+		for (size_t s = n / 4; s >= 1; s /= 2)
+		{
+			ZPT t_j = one(), ti_j = one();
+			for (size_t j = 0; j < s; ++j)
+			{
+				const size_t jr = bitrev(j, s);
+				w_R[s + jr] = t_j; wi_R[s + jr] = ti_j;
+				t_j *= sr_s; ti_j *= sr_si;
+			}
+
+			sr_s *= sr_s; sr_si *= sr_si;
+		}
+
+		w_R[0] = ZPT(w_R[1]).toMonty();
+	}
+
+	// modulo x^n + 1
+	static void set_roots_Q(ZP * const w_Q, ZP * const wi_Q, const int ln)
+	{
+		const size_t n = size_t(1) << ln;
+
+		ZPT sr_2s = primroot_n(ln), sr_2si = sr_2s.invert();	// (-1)^{1/2s}
+		for (size_t s = n / 4; s >= 1; s /= 2)
+		{
+			const ZPT sr_s = sr_2s * sr_2s, sr_si = sr_2si * sr_2si;	// (-1)^{1/s}
+
+			ZPT t_j = sr_2s, ti_j = sr_2si;
+			for (size_t j = 0; j < s; ++j)
+			{
+				const size_t jr = bitrev(j, s);
+				w_Q[s + jr] = t_j; wi_Q[s + jr] = ti_j;
+				t_j *= sr_s; ti_j *= sr_si;
+			}
+
+			sr_2s = sr_s; sr_2si = sr_si;
+		}
+
+		w_Q[0] = ZPT(w_Q[1]).toMonty();
+	}
 };
 
 #define P1			(125 * (1u << 25) + 1)
@@ -85,133 +138,44 @@ public:
 using ZP1 = ZPT<P1, Q1, MR1, RSQ1, MPR1>;
 using ZP2 = ZPT<P2, Q2, MR2, RSQ2, MPR2>;
 
-// The residue number system {P1, P2}
-class RNS
-{
-private:
-	ZP1 _r1;
-	ZP2 _r2;
-
-private:
-	explicit RNS(const ZP1 & r1, const ZP2 & r2) : _r1(r1), _r2(r2) {}
-
-public:
-	RNS() {}
-	explicit RNS(const uint32 n) : _r1(n), _r2(n) {}
-
-	static RNS one() { return RNS(ZP1::one(), ZP2::one()); }
-
-	const ZP1 & get_r1() const { return _r1; }
-	const ZP2 & get_r2() const { return _r2; }
-
-	int32 get_int() const { return _r1.get_int(); }
-
-	// Conversion into / out of Montgomery form
-	RNS toMonty() const { return RNS(_r1.toMonty(), _r2.toMonty()); }
-
-	RNS & operator*=(const RNS & rhs) { _r1 *= rhs._r1; _r2 *= rhs._r2; return *this; }
-	RNS operator*(const RNS & rhs) const { RNS r = *this; r *= rhs; return r; }
-
-	RNS invert() const { return RNS(_r1.invert(), _r2.invert()); }
-	static RNS primroot_n(const int ln) { return RNS(ZP1::primroot_n(ln), ZP2::primroot_n(ln)); }
-	static RNS norm(const int ln) { return RNS(ZP1::norm(ln), ZP2::norm(ln)); }
-};
-
 class transformGPU : public transform
 {
 private:
-	static const size_t Reg_w_R = 3, Reg_w_Q = 4, Reg_N_Q = 5, Reg_Ninv_R = 6, Reg_t_Q = 7, Reg_t = 8, Reg_one = 9, reg_count = 10;
+	static const size_t Reg_w_R = 3, Reg_w_Q = 4, Reg_N_Q = 5, Reg_Ninv_R = 6, Reg_t_Q = 7, Reg_t = 8, Reg_one = 9, Reg_count = 10;
 	int _ln = 0;
 	int _lbase = 0;
-	RNS _norm;
 	int _lm0 = 0;
 	size_t _s0 = 0;
 	bool _init_failed = false;
 	mpz_t _Nz;
 	engine * _engine = nullptr;
-	RNS * _buf = nullptr;
+	ZP * _buf = nullptr;
 
 private:
-	static constexpr size_t bitrev(const size_t i, const size_t n)
-	{
-		size_t r = 0;
-		for (size_t k = n, j = i; k > 1; k /= 2, j /= 2) r = (2 * r) | (j % 2);
-		return r;
-	}
-
-	void set_roots()
-	{
-		const int ln = _ln;
-		const size_t n = size_t(1) << ln;
-
-		// modulo x^n - 1
-		RNS * const w_R = &_buf[0 * (n / 2)];
-		RNS * const wi_R = &_buf[1 * (n / 2)];
-
-		RNS sr_s = RNS::primroot_n(ln - 1), sr_si = sr_s.invert();	// (-1)^{1/s}
-		for (size_t s = n / 4; s >= 1; s /= 2)
-		{
-			RNS t_j = RNS::one(), ti_j = RNS::one();
-			for (size_t j = 0; j < s; ++j)
-			{
-				const size_t jr = bitrev(j, s);
-				w_R[s + jr] = t_j; wi_R[s + jr] = ti_j;
-				t_j *= sr_s; ti_j *= sr_si;
-			}
-
-			sr_s *= sr_s; sr_si *= sr_si;
-		}
-
-		w_R[0] = w_R[1].toMonty();
-
-		// modulo x^n + 1
-		RNS * const w_Q = &_buf[2 * (n / 2)];
-		RNS * const wi_Q = &_buf[3 * (n / 2)];
-
-		RNS sr_2s = RNS::primroot_n(ln), sr_2si = sr_2s.invert();	// (-1)^{1/2s}
-		for (size_t s = n / 4; s >= 1; s /= 2)
-		{
-			const RNS sr_s = sr_2s * sr_2s, sr_si = sr_2si * sr_2si;	// (-1)^{1/s}
-
-			RNS t_j = sr_2s, ti_j = sr_2si;
-			for (size_t j = 0; j < s; ++j)
-			{
-				const size_t jr = bitrev(j, s);
-				w_Q[s + jr] = t_j; wi_Q[s + jr] = ti_j;
-				t_j *= sr_s; ti_j *= sr_si;
-			}
-
-			sr_2s = sr_s; sr_2si = sr_si;
-		}
-
-		w_Q[0] = w_Q[1].toMonty();
-
-		_engine->write_memory(Reg_w_R, _buf, 2);
-	}
-
 	void set_mpz(const size_t reg_y, const mpz_t & x)
 	{
 		const size_t n = size_t(1) << _ln;
 		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
-		RNS * const buf = _buf;
+		ZP * const buf = _buf;
 
 		mpz_t s, r; mpz_init_set(s, x); mpz_init(r);
 		for (size_t i = 0; i < n; ++i)
 		{
 			mpz_mod_2exp(r, s, lbase);
-			buf[i] = RNS(uint32(mpz_get_ui(r)));
+			buf[i] = ZP(uint32(mpz_get_ui(r)));
 			mpz_div_2exp(s, s, lbase);
 		}
 		mpz_clears(s, r, nullptr);
 
 		_engine->write_memory(reg_y, buf);
+		_engine->write_memory(Reg_count + reg_y, buf);
 	}
 
 	void get_mpz(mpz_t & y, const size_t reg_x)
 	{
 		const size_t n = size_t(1) << _ln;
 		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
-		RNS * const buf = _buf;
+		ZP * const buf = _buf;
 
 		_engine->read_memory(reg_x, buf);
 
@@ -219,7 +183,7 @@ private:
 		for (size_t i = n; i > 0; --i)
 		{
 			mpz_mul_2exp(y, y, lbase);
-			const int32 u = buf[i - 1].get_int();
+			const int32 u = ZP1(buf[i - 1]).get_int();
 			if (u > 0) mpz_add_ui(y, y, (unsigned long int)(u));
 			else if (u < 0) mpz_sub_ui(y, y, (unsigned long int)(-u));
 		}
@@ -390,18 +354,23 @@ public:
 	bool read_checkpoint(file & cfile) override
 	{
 		const size_t n = size_t(1) << _ln;
-		RNS * const buf = _buf;
-		const bool success = cfile.read(reinterpret_cast<char *>(buf), 2 * n * sizeof(RNS));
-		if (success) _engine->write_memory(Reg0, buf, 2);
+		ZP * const buf = _buf;
+		const bool success = cfile.read(reinterpret_cast<char *>(buf), 2 * n * sizeof(ZP));
+		if (success)
+		{
+			engine * const eng = _engine;
+			eng->write_memory(Reg0, buf, 2);
+			eng->extend01();
+		}
 		return success;
 	}
 
 	void save_checkpoint(file & cfile) const override
 	{
 		const size_t n = size_t(1) << _ln;
-		RNS * const buf = _buf;
+		ZP * const buf = _buf;
 		_engine->read_memory(Reg0, buf, 2);
-		cfile.write(reinterpret_cast<const char *>(buf), 2 * n * sizeof(RNS));
+		cfile.write(reinterpret_cast<const char *>(buf), 2 * n * sizeof(ZP));
 	}
 
 public:
@@ -427,7 +396,6 @@ public:
 				break;
 			}
 		}
-		_norm = RNS::norm(ln - 1);
 
 		int lm = ln; size_t s = 1;
 		for (; lm > 3; lm -= 3, s *= 8);
@@ -436,7 +404,7 @@ public:
 		const size_t n = size_t(1) << ln;
 		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
 
-		_buf = new RNS[2 * n];
+		_buf = new ZP[2 * n];
 
 		mpz_set_ui(R, 1); mpz_mul_2exp(R, R, lbase << ln); mpz_sub_ui(R, R, 1);
 		if (mpz_invert(t, N, R) == 0)
@@ -468,20 +436,28 @@ public:
 		src << "#define P1P2\t" << (P1 * uint64(P2)) << "ul" << std::endl;
 
 		// Not converted into Montgomery form such that output is converted out of MF
-		src << "#define NORM1\t" << _norm.get_r1().get() << "u" << std::endl;
-		src << "#define NORM2\t" << _norm.get_r2().get() << "u" << std::endl;
+		src << "#define NORM1\t" << ZP1::norm(ln - 1).get() << "u" << std::endl;
+		src << "#define NORM2\t" << ZP2::norm(ln - 1).get() << "u" << std::endl;
 
 		src << "#define CARRY_LENGTH\t" << CARRY_LENGTH << "u"  << std::endl;
 		src << "#define CARRY_WG_SZ\t" << _engine->get_carry_workgroup_size() << "u" << std::endl;
+
+		src << "#define Z_OFFSET\t" << (Reg_count * n) << "u" << std::endl;
 
 // std::cout << src.str() << std::endl;
 		if (!eng->readOpenCL("ocl/kernel.cl", "src/ocl/kernel.h", "src_ocl_kernel", src)) src << src_ocl_kernel;
 
 		eng->loadProgram(src.str());
-		eng->alloc_memory(reg_count);
+		eng->alloc_memory(Reg_count);
 		eng->create_kernels();
 
-		set_roots();
+		ZP1::set_roots_R(&_buf[0 * (n / 2)], &_buf[1 * (n / 2)], ln);
+		ZP1::set_roots_Q(&_buf[2 * (n / 2)], &_buf[3 * (n / 2)], ln);
+		eng->write_memory(Reg_w_R, _buf, 2);
+
+		ZP2::set_roots_R(&_buf[0 * (n / 2)], &_buf[1 * (n / 2)], ln);
+		ZP2::set_roots_Q(&_buf[2 * (n / 2)], &_buf[3 * (n / 2)], ln);
+		eng->write_memory(Reg_count + Reg_w_R, _buf, 2);
 
 		mpz_set(_Nz, N);
 		set_mpz(Reg_N_Q, N);
