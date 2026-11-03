@@ -202,12 +202,145 @@ INLINE void _fwd8(const ZP2 pq, ZP x[8], const ZP w1, const ZP2 w2)
 
 // ---
 
+#define LOADG(m)	ZP xl[8]; loadg(8, xl, x, m);
+#define LOADGP(m)	ZP xpl[8]; loadg(8, xpl, xp, m);
+#define STOREG(m)	storeg(8, x, m, xl);
+
+#define DECLARE_W124() \
+	const ZP w1 = load1g(w, sj); const ZP2 w2 = load2g(w, sj); const ZP4 w4 = load4g(w, sj);
+
+#define DECLARE_WI124() \
+	__global const ZP * restrict const w_i = &w[N_SZ / 2]; \
+	const ZP w1_i = load1g(w_i, sj); const ZP2 w2_i = load2g(w_i, sj); const ZP4 w4_i = load4g(w_i, sj);
+
+#define DECLARE_W124_0() \
+	const ZP w1 = load1g(w, 0); const ZP2 w2 = load2g(w, 1); const ZP4 w4 = load4g(w, 1);
+
+#define DECLARE_W2()	const ZP2 w2 = load2g(w, sj);
+#define DECLARE_W12()	const ZP w1 = load1g(w, sj); const ZP2 w2 = load2g(w, sj);
+
+#define DECLARE_W2I2() \
+	__global const ZP * restrict const w_i = &w[N_SZ / 2]; \
+	const ZP2 w2 = load2g(w, sj), w2_i = load2g(w_i, sj);
+
+#define DECLARE_W12I12() \
+	DECLARE_W2I2(); \
+	const ZP w1 = load1g(w, sj), w1_i = load1g(w_i, sj);
+
+
+INLINE void forward8g(const ZP2 pq, const sz_t m, __global ZP * restrict const x,
+	__global const ZP * restrict const w, const sz_t sj)
+{
+	DECLARE_W124();
+	LOADG(m);
+	_forward8(pq, xl, w1, w2, w4);
+	STOREG(m);
+}
+
+INLINE void backward8g(const ZP2 pq, const sz_t m, __global ZP * restrict const x,
+	__global const ZP * restrict const w, const sz_t sj)
+{
+	DECLARE_WI124();
+	LOADG(m);
+	_backward8(pq, xl, w1_i, w2_i, w4_i);
+	STOREG(m);
+}
+
+INLINE void forward8_0g(const ZP2 pq, const sz_t m, __global ZP * restrict const x,
+	__global const ZP * restrict const w, const ZP rsq)
+{
+	// Montgomery form of MF of I to convert input into MF
+	DECLARE_W124_0();
+	LOADG(m);
+	_forward8_0(pq, xl, w1, w2, w4, rsq);
+	STOREG(m);
+}
+
+INLINE void square2x4g(const ZP2 pq, __global ZP * restrict const x,
+	__global const ZP * restrict const w, const sz_t sj)
+{
+	DECLARE_W2();
+	LOADG(1);
+	_square2x4(pq, xl, w2);
+	STOREG(1);
+}
+
+INLINE void square4x2g(const ZP2 pq, __global ZP * restrict const x,
+	__global const ZP * restrict const w, const sz_t sj)
+{
+	DECLARE_W2I2();
+	LOADG(1);
+	_square4x2(pq, xl, w2, w2_i);
+	STOREG(1);
+}
+
+INLINE void square8g(const ZP2 pq, __global ZP * restrict const x,
+	__global const ZP * restrict const w, const sz_t sj)
+{
+	DECLARE_W12I12();
+	LOADG(1);
+	_square8(pq, xl, w1, w1_i, w2, w2_i);
+	STOREG(1);
+}
+
+INLINE void mul2x4g(const ZP2 pq, __global ZP * restrict const x, __global const ZP * restrict const xp,
+	__global const ZP * restrict const w, const sz_t sj)
+{
+	DECLARE_W2();
+	LOADG(1);
+	LOADGP(1);
+	_mul2x4(pq, xl, xpl, w2);
+	STOREG(1);
+}
+
+INLINE void mul4x2g(const ZP2 pq, __global ZP * restrict const x, __global const ZP * restrict const xp,
+	__global const ZP * restrict const w, const sz_t sj)
+{
+	DECLARE_W2I2();
+	LOADG(1);
+	LOADGP(1);
+	_mul4x2(pq, xl, xpl, w2, w2_i);
+	STOREG(1);
+}
+
+INLINE void mul8g(const ZP2 pq, __global ZP * restrict const x, __global const ZP * restrict const xp,
+	__global const ZP * restrict const w, const sz_t sj)
+{
+	DECLARE_W12I12();
+	LOADG(1);
+	LOADGP(1);
+	_mul8(pq, xl, xpl, w1, w1_i, w2, w2_i);
+	STOREG(1);
+}
+
+INLINE void fwd4x2g(const ZP2 pq, __global ZP * restrict const x,
+	__global const ZP * restrict const w, const sz_t sj)
+{
+	DECLARE_W2();
+	LOADG(1);
+	_fwd4x2(pq, xl, w2);
+	STOREG(1);
+}
+
+INLINE void fwd8g(const ZP2 pq, __global ZP * restrict const x,
+	__global const ZP * restrict const w, const sz_t sj)
+{
+	DECLARE_W12();
+	LOADG(1);
+	_fwd8(pq, xl, w1, w2);
+	STOREG(1);
+}
+
 // --- transform/macro ---
 
 #define DECLARE_VAR_REG() \
 	const sz_t gid = (sz_t)get_global_id(0), lid = gid / (N_SZ / 8), id = gid % (N_SZ / 8); \
 	const ZP2 pq = g_pq[lid]; \
-	__global ZP * restrict const reg = &regm[lid * Z_OFFSET];
+	__global ZP * restrict const reg = &regm[lid * Z_OFFSET]; \
+	__global ZP * restrict const x = &reg[reg_x * N_SZ]; \
+	__global const ZP * restrict const w = &reg[reg_w * N_SZ];
+
+#define DECLARE_VARP_REG()	__global const ZP * restrict const xp = &reg[reg_xp * N_SZ];
 
 // --- transform without local mem ---
 
@@ -215,190 +348,91 @@ __kernel
 void forward8(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const int_32 lm, const uint_32 s)
 {
 	DECLARE_VAR_REG();
-
-	__global ZP * restrict const x = &reg[reg_x * N_SZ];
-	__global const ZP * restrict const w = &reg[reg_w * N_SZ];
 	const sz_t m = 1u << lm, sj = s + (id >> lm), k = 7 * (id & ~(m - 1)) + id;
-
-	const ZP w1 = load1g(w, sj); const ZP2 w2 = load2g(w, sj); const ZP4 w4 = load4g(w, sj);
-
-	ZP xl[8]; loadg(8, xl, &x[k], m);
-	_forward8(pq, xl, w1, w2, w4);
-	storeg(8, &x[k], m, xl);
+	forward8g(pq, m, &x[k], w, sj);
 }
 
 __kernel
 void backward8(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const int_32 lm, const uint_32 s)
 {
 	DECLARE_VAR_REG();
-
-	__global ZP * restrict const x = &reg[reg_x * N_SZ];
-	__global const ZP * restrict const w_i = &reg[reg_w * N_SZ + N_SZ / 2];
 	const sz_t m = 1u << lm, sj = s + (id >> lm), k = 7 * (id & ~(m - 1)) + id;
-
-	const ZP w1_i = load1g(w_i, sj); const ZP2 w2_i = load2g(w_i, sj); const ZP4 w4_i = load4g(w_i, sj);
-
-	ZP xl[8]; loadg(8, xl, &x[k], m);
-	_backward8(pq, xl, w1_i, w2_i, w4_i);
-	storeg(8, &x[k], m, xl);
+	backward8g(pq, m, &x[k], w, sj);
 }
 
 __kernel
 void forward8_0(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
 	DECLARE_VAR_REG();
-
-	__global ZP * restrict const x = &reg[reg_x * N_SZ];
-	__global const ZP * restrict const w = &reg[reg_w * N_SZ];
 	const sz_t m = N_SZ / 8, k = id;
-
-	// Montgomery form of MF of I to convert input into MF
-	const ZP w1 = load1g(w, 0); const ZP2 w2 = load2g(w, 1); const ZP4 w4 = load4g(w, 1);
-
-	ZP xl[8]; loadg(8, xl, &x[k], m);
-	_forward8_0(pq, xl, w1, w2, w4, g_rsq[lid]);
-	storeg(8, &x[k], m, xl);
+	forward8_0g(pq, m, &x[k], w, g_rsq[lid]);
 }
 
 __kernel
 void square2x4(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
 	DECLARE_VAR_REG();
-
-	__global ZP * restrict const x = &reg[reg_x * N_SZ];
-	__global const ZP * restrict const w = &reg[reg_w * N_SZ];
-	const sz_t m = 1, sj = N_SZ / 8 + id, k = 8 * id;
-
-	const ZP2 w2 = load2g(w, sj);
-
-	ZP xl[8]; loadg(8, xl, &x[k], m);
-	_square2x4(pq, xl, w2);
-	storeg(8, &x[k], m, xl);
+	const sz_t sj = N_SZ / 8 + id, k = 8 * id;
+	square2x4g(pq, &x[k], w, sj);
 }
 
 __kernel
 void square4x2(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
 	DECLARE_VAR_REG();
-
-	__global ZP * restrict const x = &reg[reg_x * N_SZ];
-	__global const ZP * restrict const w = &reg[reg_w * N_SZ];
-	__global const ZP * restrict const w_i = &w[N_SZ / 2];
-	const sz_t m = 1, sj = N_SZ / 8 + id, k = 8 * id;
-
-	const ZP2 w2 = load2g(w, sj), w2_i = load2g(w_i, sj);
-
-	ZP xl[8]; loadg(8, xl, &x[k], m);
-	_square4x2(pq, xl, w2, w2_i);
-	storeg(8, &x[k], m, xl);
+	const sz_t sj = N_SZ / 8 + id, k = 8 * id;
+	square4x2g(pq, &x[k], w, sj);
 }
 
 __kernel
 void square8(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
 	DECLARE_VAR_REG();
-
-	__global ZP * restrict const x = &reg[reg_x * N_SZ];
-	__global const ZP * restrict const w = &reg[reg_w * N_SZ];
-	__global const ZP * restrict const w_i = &w[N_SZ / 2];
-	const sz_t m = 1, sj = N_SZ / 8 + id, k = 8 * id;
-
-	const ZP w1 = load1g(w, sj), w1_i = load1g(w_i, sj);
-	const ZP2 w2 = load2g(w, sj), w2_i = load2g(w_i, sj);
-
-	ZP xl[8]; loadg(8, xl, &x[k], m);
-	_square8(pq, xl, w1, w1_i, w2, w2_i);
-	storeg(8, &x[k], m, xl);
+	const sz_t sj = N_SZ / 8 + id, k = 8 * id;
+	square8g(pq, &x[k], w, sj);
 }
 
 __kernel
 void mul2x4(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_xp, const uint_32 reg_w)
 {
 	DECLARE_VAR_REG();
-
-	__global ZP * restrict const x = &reg[reg_x * N_SZ];
-	__global const ZP * restrict const xp = &reg[reg_xp * N_SZ];
-	__global const ZP * restrict const w = &reg[reg_w * N_SZ];
-	const sz_t m = 1, sj = N_SZ / 8 + id, k = 8 * id;
-
-	const ZP2 w2 = load2g(w, sj);
-
-	ZP xl[8]; loadg(8, xl, &x[k], m);
-	ZP xpl[8]; loadg(8, xpl, &xp[k], m);
-	_mul2x4(pq, xl, xpl, w2);
-	storeg(8, &x[k], m, xl);
+	DECLARE_VARP_REG();
+	const sz_t sj = N_SZ / 8 + id, k = 8 * id;
+	mul2x4g(pq, &x[k], &xp[k], w, sj);
 }
 
 __kernel
 void mul4x2(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_xp, const uint_32 reg_w)
 {
 	DECLARE_VAR_REG();
-
-	__global ZP * restrict const x = &reg[reg_x * N_SZ];
-	__global const ZP * restrict const xp = &reg[reg_xp * N_SZ];
-	__global const ZP * restrict const w = &reg[reg_w * N_SZ];
-	__global const ZP * restrict const w_i = &w[N_SZ / 2];
-	const sz_t m = 1, sj = N_SZ / 8 + id, k = 8 * id;
-
-	const ZP2 w2 = load2g(w, sj), w2_i = load2g(w_i, sj);
-
-	ZP xl[8]; loadg(8, xl, &x[k], m);
-	ZP xpl[8]; loadg(8, xpl, &xp[k], m);
-	_mul4x2(pq, xl, xpl, w2, w2_i);
-	storeg(8, &x[k], m, xl);
+	DECLARE_VARP_REG();
+	const sz_t sj = N_SZ / 8 + id, k = 8 * id;
+	mul4x2g(pq, &x[k], &xp[k], w, sj);
 }
 
 __kernel
 void mul8(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_xp, const uint_32 reg_w)
 {
 	DECLARE_VAR_REG();
-
-	__global ZP * restrict const x = &reg[reg_x * N_SZ];
-	__global const ZP * restrict const xp = &reg[reg_xp * N_SZ];
-	__global const ZP * restrict const w = &reg[reg_w * N_SZ];
-	__global const ZP * restrict const w_i = &w[N_SZ / 2];
-	const sz_t m = 1, sj = N_SZ / 8 + id, k = 8 * id;
-
-	const ZP w1 = load1g(w, sj), w1_i = load1g(w_i, sj);
-	const ZP2 w2 = load2g(w, sj), w2_i = load2g(w_i, sj);
-
-	ZP xl[8]; loadg(8, xl, &x[k], m);
-	ZP xpl[8]; loadg(8, xpl, &xp[k], m);
-	_mul8(pq, xl, xpl, w1, w1_i, w2, w2_i);
-	storeg(8, &x[k], m, xl);
+	DECLARE_VARP_REG();
+	const sz_t sj = N_SZ / 8 + id, k = 8 * id;
+	mul8g(pq, &x[k], &xp[k], w, sj);
 }
 
 __kernel
 void fwd4x2(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
 	DECLARE_VAR_REG();
-
-	__global ZP * restrict const x = &reg[reg_x * N_SZ];
-	__global const ZP * restrict const w = &reg[reg_w * N_SZ];
-	const sz_t m = 1, sj = N_SZ / 8 + id, k = 8 * id;
-
-	const ZP2 w2 = load2g(w, sj);
-
-	ZP xl[8]; loadg(8, xl, &x[k], m);
-	_fwd4x2(pq, xl, w2);
-	storeg(8, &x[k], m, xl);
+	const sz_t sj = N_SZ / 8 + id, k = 8 * id;
+	fwd4x2g(pq, &x[k], w, sj);
 }
 
 __kernel
 void fwd8(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
 	DECLARE_VAR_REG();
-
-	__global ZP * restrict const x = &reg[reg_x * N_SZ];
-	__global const ZP * restrict const w = &reg[reg_w * N_SZ];
-	const sz_t m = 1, sj = N_SZ / 8 + id, k = 8 * id;
-
-	const ZP w1 = load1g(w, sj);
-	const ZP2 w2 = load2g(w, sj);
-
-	ZP xl[8]; loadg(8, xl, &x[k], m);
-	_fwd8(pq, xl, w1, w2);
-	storeg(8, &x[k], m, xl);
+	const sz_t sj = N_SZ / 8 + id, k = 8 * id;
+	fwd8g(pq, &x[k], w, sj);
 }
 
 // --- transform using local mem ---
