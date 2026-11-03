@@ -523,6 +523,11 @@ void carry_complete(__global ZP * restrict const reg, __global const int_64 * re
 
 // --- strict modulo ---
 
+INLINE void set_rns(__global ZP * restrict const x, const int i)
+{
+	x[0] = set_int(i, P1); x[0 + Z_OFFSET] = set_int(i, P2);
+}
+
 // b-1, b-1, ..., b-1, b + a, ... => b, 0, ..., 0, a, ...
 INLINE void fix_base(__global ZP * restrict const x)
 {
@@ -549,12 +554,19 @@ void mod_Q(__global ZP * restrict const reg, const uint_32 reg_x)
 	fix_base(x);
 
 	int_32 hi = get_int(x[N_SZ - 1], P1);
-	if (hi >= (int_32)(BASE))
+	if (hi < 0)
 	{
 		int_32 lo = get_int(x[0], P1);
-		while (hi >= (int_32)(BASE)) { hi -= (int_32)(BASE); lo -= 1; }	// - Q
-		x[N_SZ - 1] = set_int(hi, P1); x[N_SZ - 1 + Z_OFFSET] = set_int(hi, P2);
-		x[0] = set_int(lo, P1); x[0 + Z_OFFSET] = set_int(lo, P2);
+		hi += (int_32)(BASE); lo += 1;	// + Q
+		set_rns(&x[N_SZ - 1], hi);
+		set_rns(&x[0], lo);
+	}
+	else if (hi >= (int_32)(BASE))
+	{
+		int_32 lo = get_int(x[0], P1);
+		hi -= (int_32)(BASE); lo -= 1;	// - Q
+		set_rns(&x[N_SZ - 1], hi);
+		set_rns(&x[0], lo);
 	}
 }
 
@@ -566,13 +578,18 @@ void mod_R_add2(__global ZP * restrict const reg, const uint_32 reg_x)
 	fix_base(x);
 
 	int_32 hi = get_int(x[N_SZ - 1], P1), lo = get_int(x[0], P1);
-	if (hi >= (int_32)(BASE))
+	if (hi < 0)
 	{
-		while (hi >= (int_32)(BASE)) { hi -= (int_32)(BASE); lo += 1; }	// - R
-		x[N_SZ - 1] = set_int(hi, P1); x[N_SZ - 1 + Z_OFFSET] = set_int(hi, P2);
+		int_32 lo = get_int(x[0], P1);
+		hi += (int_32)(BASE); lo -= 1;	// + R
+		set_rns(&x[N_SZ - 1], hi);
 	}
-	lo += 2;
-	x[0] = set_int(lo, P1); x[0 + Z_OFFSET] = set_int(lo, P2);
+	else if (hi >= (int_32)(BASE))
+	{
+		hi -= (int_32)(BASE); lo += 1;	// - R
+		set_rns(&x[N_SZ - 1], hi);
+	}
+	set_rns(&x[0], lo + 2);
 }
 
 // --- misc ---
