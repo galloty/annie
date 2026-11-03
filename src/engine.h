@@ -37,14 +37,14 @@ private:
 	const int _ln;
 	const int _carry_shift;
 
-	cl_mem _reg, _carry;
+	cl_mem _reg, _carry, _fix;
 
 	cl_kernel _forward8 = nullptr, _backward8 = nullptr, _forward8_0 = nullptr;
 	cl_kernel _square2x4 = nullptr, _square4x2 = nullptr, _square8 = nullptr;
 	cl_kernel _mul2x4 = nullptr, _mul4x2 = nullptr, _mul8 = nullptr;
 	cl_kernel _fwd4x2 = nullptr, _fwd8 = nullptr;
 	cl_kernel _carry_mul = nullptr, _carry_sub = nullptr, _carry_complete = nullptr;
-	cl_kernel _mod_Q = nullptr, _mod_R_add2 = nullptr;
+	cl_kernel _mod_Q = nullptr, _mod_R_add2 = nullptr, _fix_reset = nullptr, _fix_scan = nullptr, _fix_zero = nullptr;
 	cl_kernel _set = nullptr, _extend = nullptr;
 
 	std::vector<cl_kernel> _kernels;
@@ -79,6 +79,7 @@ public:
 			}
 			_reg = _createBuffer(CL_MEM_READ_WRITE, mem_size);
 			_carry = _createBuffer(CL_MEM_READ_WRITE, n / CARRY_LENGTH * sizeof(int64));
+			_fix = _createBuffer(CL_MEM_READ_WRITE, 2 * sizeof(int32));
 		}
 	}
 
@@ -91,6 +92,7 @@ public:
 		{
 			_releaseBuffer(_reg);
 			_releaseBuffer(_carry);
+			_releaseBuffer(_fix);
 		}
 	}
 
@@ -132,6 +134,9 @@ public:
 
 		CREATE_KERNEL(mod_Q);
 		CREATE_KERNEL(mod_R_add2);
+		CREATE_KERNEL(fix_reset);
+		CREATE_KERNEL(fix_scan);
+		CREATE_KERNEL(fix_zero);
 
 		CREATE_KERNEL(set);
 		CREATE_KERNEL(extend);
@@ -290,18 +295,40 @@ public:
 		_executeKernel(_carry_complete, ((1u << _ln) / CARRY_LENGTH) >> _carry_shift);
 	}
 
+	void fix_scan(const uint32 rx)
+	{
+		_setKernelArg(_fix_reset, 1, sizeof(cl_mem), &_fix);
+		_executeKernel(_fix_reset, 1);
+		_setKernelArg(_fix_scan, 1, sizeof(cl_mem), &_fix);
+		_setKernelArg(_fix_scan, 2, sizeof(uint32), &rx);
+		_executeKernel(_fix_scan, 1u << _ln);
+	}
+
+	void fix_zero(const uint32 rx)
+	{
+		_setKernelArg(_fix_zero, 1, sizeof(cl_mem), &_fix);
+		_setKernelArg(_fix_zero, 2, sizeof(uint32), &rx);
+		_executeKernel(_fix_zero, 1u << _ln);
+	}
+
 	void mod_Q(const size_t reg_x)
 	{
 		const uint32 rx = uint32(reg_x);
-		_setKernelArg(_mod_Q, 1, sizeof(uint32), &rx);
+		fix_scan(rx);
+		_setKernelArg(_mod_Q, 1, sizeof(cl_mem), &_fix);
+		_setKernelArg(_mod_Q, 2, sizeof(uint32), &rx);
 		_executeKernel(_mod_Q, 1);
+		fix_zero(rx);
 	}
 
 	void mod_R_add2(const size_t reg_x)
 	{
 		const uint32 rx = uint32(reg_x);
-		_setKernelArg(_mod_R_add2, 1, sizeof(uint32), &rx);
+		fix_scan(rx);
+		_setKernelArg(_mod_R_add2, 1, sizeof(cl_mem), &_fix);
+		_setKernelArg(_mod_R_add2, 2, sizeof(uint32), &rx);
 		_executeKernel(_mod_R_add2, 1);
+		fix_zero(rx);
 	}
 
 	void set(const size_t reg_y, const size_t reg_x)
