@@ -167,8 +167,9 @@ private:
 		}
 		mpz_clears(s, r, nullptr);
 
-		_engine->write_memory(reg_y, buf);
-		_engine->write_memory(Reg_count + reg_y, buf);
+		engine * const eng = _engine;
+		eng->write_memory(reg_y, buf);
+		eng->write_memory(Reg_count + reg_y, buf);
 	}
 
 	void get_mpz(mpz_t & y, const size_t reg_x)
@@ -195,8 +196,9 @@ private:
 
 		int lm = _ln - 3; size_t s = 1;
 		eng->forward8_0(reg_x, reg_w);
+		lm -= 3, s *= 8;
 
-		for (lm -= 3, s *= 8; lm > 0; lm -= 3, s *= 8) eng->forward8(reg_x, reg_w, lm, s);
+		for (int lm0 = _lm0; lm >= lm0; lm -= 3, s *= 8) eng->forward8(reg_x, reg_w, lm, s);
 	}
 
 	void NTT_inverse8(const size_t reg_x, const size_t reg_w)
@@ -209,33 +211,57 @@ private:
 
 	void NTT_forward(const size_t reg_x, const size_t reg_w)
 	{
+		engine * const eng = _engine;
+
 		NTT_forward8(reg_x, reg_w);
 
 		const int lm0 = _lm0;
-		if (lm0 == 3) _engine->fwd8(reg_x, reg_w);
-		else if (lm0 == 2) _engine->fwd4x2(reg_x, reg_w);
+		if      (lm0 == 9) eng->fwd512(reg_x, reg_w);
+		else if (lm0 == 8) eng->fwd256(reg_x, reg_w);
+		else if (lm0 == 7) eng->fwd128(reg_x, reg_w);
+		else if (lm0 == 6) eng->fwd64(reg_x, reg_w);
+		else if (lm0 == 5) eng->fwd32(reg_x, reg_w);
+		else if (lm0 == 4) eng->fwd16(reg_x, reg_w);
+		else if (lm0 == 3) eng->fwd8(reg_x, reg_w);
+		else if (lm0 == 2) eng->fwd4x2(reg_x, reg_w);
 	}
 
 	void square(const size_t reg_x, const size_t reg_w)
 	{
+		engine * const eng = _engine;
+
 		NTT_forward8(reg_x, reg_w);
 
 		const int lm0 = _lm0;
-		if (lm0 == 3) _engine->square8(reg_x, reg_w);
-		else if (lm0 == 2) _engine->square4x2(reg_x, reg_w);
-		else if (lm0 == 1) _engine->square2x4(reg_x, reg_w);
+		if      (lm0 == 9) eng->square512(reg_x, reg_w);
+		else if (lm0 == 8) eng->square256(reg_x, reg_w);
+		else if (lm0 == 7) eng->square128(reg_x, reg_w);
+		else if (lm0 == 6) eng->square64(reg_x, reg_w);
+		else if (lm0 == 5) eng->square32(reg_x, reg_w);
+		else if (lm0 == 4) eng->square16(reg_x, reg_w);
+		else if (lm0 == 3) eng->square8(reg_x, reg_w);
+		else if (lm0 == 2) eng->square4x2(reg_x, reg_w);
+		else if (lm0 == 1) eng->square2x4(reg_x, reg_w);
 
 		NTT_inverse8(reg_x, reg_w);
 	}
 
 	void mul_const(const size_t reg_y, const size_t reg_x, const size_t reg_w)
 	{
+		engine * const eng = _engine;
+
 		NTT_forward8(reg_y, reg_w);
 
 		const int lm0 = _lm0;
-		if (lm0 == 3) _engine->mul8(reg_y, reg_x, reg_w);
-		else if (lm0 == 2) _engine->mul4x2(reg_y, reg_x, reg_w);
-		else if (lm0 == 1) _engine->mul2x4(reg_y, reg_x, reg_w);
+		if      (lm0 == 9) eng->mul512(reg_y, reg_x, reg_w);
+		else if (lm0 == 8) eng->mul256(reg_y, reg_x, reg_w);
+		else if (lm0 == 7) eng->mul128(reg_y, reg_x, reg_w);
+		else if (lm0 == 6) eng->mul64(reg_y, reg_x, reg_w);
+		else if (lm0 == 5) eng->mul32(reg_y, reg_x, reg_w);
+		else if (lm0 == 4) eng->mul16(reg_y, reg_x, reg_w);
+		else if (lm0 == 3) eng->mul8(reg_y, reg_x, reg_w);
+		else if (lm0 == 2) eng->mul4x2(reg_y, reg_x, reg_w);
+		else if (lm0 == 1) eng->mul2x4(reg_y, reg_x, reg_w);
 
 		NTT_inverse8(reg_y, reg_w);
 	}
@@ -397,8 +423,8 @@ public:
 			}
 		}
 
-		int lm = ln; size_t s = 1;
-		for (; lm > 3; lm -= 3, s *= 8);
+		int lm = ln - 3; size_t s = 8;
+		for (; lm > 9; lm -= 3, s *= 8);
 		_lm0 = lm; _s0 = s / 8;
 
 		const size_t n = size_t(1) << ln;
@@ -417,6 +443,21 @@ public:
 
 		_engine = new engine(ln, device_id);
 		engine * const eng = _engine;
+
+		lm = _ln - 3; s = 1;
+		std::cout << "ln = " << ln << ", forward8_0";
+		lm -= 3, s *= 8;
+		for (int lm0 = _lm0; lm >= lm0; lm -= 3, s *= 8) std::cout << " forward8(" << lm << ", " << s << ")";
+		if      (_lm0 == 9) std::cout << " square512";
+		else if (_lm0 == 8) std::cout << " square256";
+		else if (_lm0 == 7) std::cout << " square128";
+		else if (_lm0 == 6) std::cout << " square64 " << BLK64 << ", " << eng->get_blk64();
+		else if (_lm0 == 5) std::cout << " square32 " << BLK32 << ", " << eng->get_blk32();
+		else if (_lm0 == 4) std::cout << " square16 " << BLK16 << ", " << eng->get_blk16();
+		else if (_lm0 == 3) std::cout << " square8";
+		else if (_lm0 == 2) std::cout << " square4x2";
+		else if (_lm0 == 1) std::cout << " square2x4";
+		std::cout << std::endl;
 
 		std::ostringstream src;
 
@@ -440,9 +481,16 @@ public:
 		src << "#define NORM2\t" << ZP2::norm(ln - 1).get() << "u" << std::endl;
 
 		src << "#define CARRY_LENGTH\t" << CARRY_LENGTH << "u"  << std::endl;
-		src << "#define CARRY_WG_SZ\t" << _engine->get_carry_workgroup_size() << "u" << std::endl;
+		src << "#define CARRY_WG_SZ\t" << eng->get_carry_workgroup_size() << "u" << std::endl;
 
 		src << "#define Z_OFFSET\t" << (Reg_count * n) << "u" << std::endl;
+
+		src << "#define BLK16\t" << eng->get_blk16() << std::endl;
+		src << "#define BLK32\t" << eng->get_blk32() << std::endl;
+		src << "#define BLK64\t" << eng->get_blk64() << std::endl;
+		src << "#define BLK128\t" << BLK128 << std::endl;
+		src << "#define BLK256\t" << BLK256 << std::endl;
+		src << "#define BLK512\t" << BLK512 << std::endl;
 
 // std::cout << src.str() << std::endl;
 		if (!eng->readOpenCL("ocl/kernel.cl", "src/ocl/kernel.h", "src_ocl_kernel", src)) src << src_ocl_kernel;
@@ -480,10 +528,11 @@ public:
 	{
 		mpz_clear(_Nz);
 
-		_engine->release_kernels();
-		_engine->release_memory();
-		_engine->clearProgram();
-		delete _engine;
+		engine * const eng = _engine;
+		eng->release_kernels();
+		eng->release_memory();
+		eng->clearProgram();
+		delete eng;
 
 		delete[] _buf;
 	}

@@ -29,7 +29,15 @@ public:
 
 #define	CARRY_LENGTH	4u
 
+#define BLK16			32	// local size = 16 * BLK16 * sizeof(ZP) = 2KB, workgroup size = 16 / 8 * BLK16 = 64
+#define BLK32			16
+#define BLK64			8
+#define BLK128			4
+#define BLK256			2
+#define BLK512			1
+
 #define CREATE_KERNEL(name) _##name = create_kernel(#name);
+#define CREATE_KERNEL_CARRY(name) _##name = create_kernel_carry(#name);
 
 class engine : public device
 {
@@ -41,8 +49,14 @@ private:
 
 	cl_kernel _forward8 = nullptr, _backward8 = nullptr, _forward8_0 = nullptr;
 	cl_kernel _square2x4 = nullptr, _square4x2 = nullptr, _square8 = nullptr;
+	cl_kernel _square16 = nullptr, _square32 = nullptr, _square64 = nullptr;
+	cl_kernel _square128 = nullptr, _square256 = nullptr, _square512 = nullptr;
 	cl_kernel _mul2x4 = nullptr, _mul4x2 = nullptr, _mul8 = nullptr;
+	cl_kernel _mul16 = nullptr, _mul32 = nullptr, _mul64 = nullptr;
+	cl_kernel _mul128 = nullptr, _mul256 = nullptr, _mul512 = nullptr;
 	cl_kernel _fwd4x2 = nullptr, _fwd8 = nullptr;
+	cl_kernel _fwd16 = nullptr, _fwd32 = nullptr, _fwd64 = nullptr;
+	cl_kernel _fwd128 = nullptr, _fwd256 = nullptr, _fwd512 = nullptr;
 	cl_kernel _carry_mul = nullptr, _carry_sub = nullptr, _carry_complete = nullptr;
 	cl_kernel _mod_Q = nullptr, _mod_R_add2 = nullptr;
 	cl_kernel _set = nullptr, _extend = nullptr;
@@ -58,6 +72,10 @@ public:
 
 	int get_carry_shift() const { return _carry_shift; }
 	size_t get_carry_workgroup_size() const { return (size_t(1) << _carry_shift); }
+
+	size_t get_blk16() const { return size_t(std::max(std::min(BLK16, (1 << _ln) / 16), 1)); }
+	size_t get_blk32() const { return size_t(std::max(std::min(BLK32, (1 << _ln) / 32), 1)); }
+	size_t get_blk64() const { return size_t(std::max(std::min(BLK64, (1 << _ln) / 64), 1)); }
 
 ///////////////////////////////
 
@@ -105,6 +123,13 @@ private:
 		return kernel;
 	}
 
+	cl_kernel create_kernel_carry(const char * const kernel_name)
+	{
+		cl_kernel kernel = create_kernel(kernel_name);
+		_setKernelArg(kernel, 1, sizeof(cl_mem), &_carry);
+		return kernel;
+	}
+
 public:
 	void create_kernels()
 	{
@@ -118,17 +143,35 @@ public:
 		CREATE_KERNEL(square2x4);
 		CREATE_KERNEL(square4x2);
 		CREATE_KERNEL(square8);
+		CREATE_KERNEL(square16);
+		CREATE_KERNEL(square32);
+		CREATE_KERNEL(square64);
+		CREATE_KERNEL(square128);
+		CREATE_KERNEL(square256);
+		CREATE_KERNEL(square512);
 
 		CREATE_KERNEL(mul2x4);
 		CREATE_KERNEL(mul4x2);
 		CREATE_KERNEL(mul8);
+		CREATE_KERNEL(mul16);
+		CREATE_KERNEL(mul32);
+		CREATE_KERNEL(mul64);
+		CREATE_KERNEL(mul128);
+		CREATE_KERNEL(mul256);
+		CREATE_KERNEL(mul512);
 
 		CREATE_KERNEL(fwd4x2);
 		CREATE_KERNEL(fwd8);
+		CREATE_KERNEL(fwd16);
+		CREATE_KERNEL(fwd32);
+		CREATE_KERNEL(fwd64);
+		CREATE_KERNEL(fwd128);
+		CREATE_KERNEL(fwd256);
+		CREATE_KERNEL(fwd512);
 
-		CREATE_KERNEL(carry_mul);
-		CREATE_KERNEL(carry_sub);
-		CREATE_KERNEL(carry_complete);
+		CREATE_KERNEL_CARRY(carry_mul);
+		CREATE_KERNEL_CARRY(carry_sub);
+		CREATE_KERNEL_CARRY(carry_complete);
 
 		CREATE_KERNEL(mod_Q);
 		CREATE_KERNEL(mod_R_add2);
@@ -165,108 +208,68 @@ public:
 
 ///////////////////////////////
 
+private:
+	void execute_kernel(cl_kernel & kernel, const size_t reg_x, const size_t reg_w, const size_t wg_size = 0)
+	{
+		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
+		_setKernelArg(kernel, 1, sizeof(uint32), &rx);
+		_setKernelArg(kernel, 2, sizeof(uint32), &rw);
+		_executeKernel(kernel, 2u << (_ln - 3), wg_size);
+	}
+
+	void execute_kernel_fb(cl_kernel & kernel, const size_t reg_x, const size_t reg_w, const int lm, const size_t s, const size_t wg_size = 0)
+	{
+		const int32 lm32 = int32(lm); const uint32 s32 = uint32(s);
+		_setKernelArg(kernel, 3, sizeof(int32), &lm32);
+		_setKernelArg(kernel, 4, sizeof(uint32), &s32);
+		execute_kernel(kernel, reg_x, reg_w, wg_size);
+	}
+
+	void execute_kernel_mul(cl_kernel & kernel, const size_t reg_x, const size_t reg_xp, const size_t reg_w, const size_t wg_size = 0)
+	{
+		const uint32 rxp = uint32(reg_xp);
+		_setKernelArg(kernel, 3, sizeof(uint32), &rxp);
+		execute_kernel(kernel, reg_x, reg_w, wg_size);
+	}
+
 public:
- 	void forward8(const size_t reg_x, const size_t reg_w, const int lm, const size_t s)
-	{
-		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
-		const int32 lm32 = int32(lm); const uint32 s32 = uint32(s);
-		_setKernelArg(_forward8, 1, sizeof(uint32), &rx);
-		_setKernelArg(_forward8, 2, sizeof(uint32), &rw);
-		_setKernelArg(_forward8, 3, sizeof(int32), &lm32);
-		_setKernelArg(_forward8, 4, sizeof(uint32), &s32);
-		_executeKernel(_forward8, 2u << (_ln - 3));
-	}
+ 	void forward8(const size_t reg_x, const size_t reg_w, const int lm, const size_t s) { execute_kernel_fb(_forward8, reg_x, reg_w, lm, s); }
+	void backward8(const size_t reg_x, const size_t reg_w, const int lm, const size_t s) { execute_kernel_fb(_backward8, reg_x, reg_w, lm, s); }
 
-	void backward8(const size_t reg_x, const size_t reg_w, const int lm, const size_t s)
-	{
-		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
-		const int32 lm32 = int32(lm); const uint32 s32 = uint32(s);
-		_setKernelArg(_backward8, 1, sizeof(uint32), &rx);
-		_setKernelArg(_backward8, 2, sizeof(uint32), &rw);
-		_setKernelArg(_backward8, 3, sizeof(int32), &lm32);
-		_setKernelArg(_backward8, 4, sizeof(uint32), &s32);
-		_executeKernel(_backward8, 2u << (_ln - 3));
-	}
+	void forward8_0(const size_t reg_x, const size_t reg_w) { execute_kernel(_forward8_0, reg_x, reg_w); }
 
-	void forward8_0(const size_t reg_x, const size_t reg_w)
-	{
-		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
-		_setKernelArg(_forward8_0, 1, sizeof(uint32), &rx);
-		_setKernelArg(_forward8_0, 2, sizeof(uint32), &rw);
-		_executeKernel(_forward8_0, 2u << (_ln - 3));
-	}
+	void square2x4(const size_t reg_x, const size_t reg_w) { execute_kernel(_square2x4, reg_x, reg_w); }
+	void square4x2(const size_t reg_x, const size_t reg_w) { execute_kernel(_square4x2, reg_x, reg_w); }
+	void square8(const size_t reg_x, const size_t reg_w) { execute_kernel(_square8, reg_x, reg_w); }
+	void square16(const size_t reg_x, const size_t reg_w) { execute_kernel(_square16, reg_x, reg_w); }
+	void square32(const size_t reg_x, const size_t reg_w) { execute_kernel(_square32, reg_x, reg_w); }
+	void square64(const size_t reg_x, const size_t reg_w) { execute_kernel(_square64, reg_x, reg_w); }
+	void square128(const size_t reg_x, const size_t reg_w) { execute_kernel(_square128, reg_x, reg_w); }
+	void square256(const size_t reg_x, const size_t reg_w) { execute_kernel(_square256, reg_x, reg_w); }
+	void square512(const size_t reg_x, const size_t reg_w) { execute_kernel(_square512, reg_x, reg_w); }
 
-	void square2x4(const size_t reg_x, const size_t reg_w)
-	{
-		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
-		_setKernelArg(_square2x4, 1, sizeof(uint32), &rx);
-		_setKernelArg(_square2x4, 2, sizeof(uint32), &rw);
-		_executeKernel(_square2x4, 2u << (_ln - 3));
-	}
+	void mul2x4(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul2x4, reg_x, reg_xp, reg_w); }
+	void mul4x2(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul4x2, reg_x, reg_xp, reg_w); }
+	void mul8(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul8, reg_x, reg_xp, reg_w); }
+	void mul16(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul16, reg_x, reg_xp, reg_w); }
+	void mul32(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul32, reg_x, reg_xp, reg_w); }
+	void mul64(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul64, reg_x, reg_xp, reg_w); }
+	void mul128(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul128, reg_x, reg_xp, reg_w); }
+	void mul256(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul256, reg_x, reg_xp, reg_w); }
+	void mul512(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul512, reg_x, reg_xp, reg_w); }
 
-	void square4x2(const size_t reg_x, const size_t reg_w)
-	{
-		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
-		_setKernelArg(_square4x2, 1, sizeof(uint32), &rx);
-		_setKernelArg(_square4x2, 2, sizeof(uint32), &rw);
-		_executeKernel(_square4x2, 2u << (_ln - 3));
-	}
-
-	void square8(const size_t reg_x, const size_t reg_w)
-	{
-		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
-		_setKernelArg(_square8, 1, sizeof(uint32), &rx);
-		_setKernelArg(_square8, 2, sizeof(uint32), &rw);
-		_executeKernel(_square8, 2u << (_ln - 3));
-	}
-
-	void mul2x4(const size_t reg_x, const size_t reg_xp, const size_t reg_w)
-	{
-		const uint32 rx = uint32(reg_x), rxp = uint32(reg_xp), rw = uint32(reg_w);
-		_setKernelArg(_mul2x4, 1, sizeof(uint32), &rx);
-		_setKernelArg(_mul2x4, 2, sizeof(uint32), &rxp);
-		_setKernelArg(_mul2x4, 3, sizeof(uint32), &rw);
-		_executeKernel(_mul2x4, 2u << (_ln - 3));
-	}
-
-	void mul4x2(const size_t reg_x, const size_t reg_xp, const size_t reg_w)
-	{
-		const uint32 rx = uint32(reg_x), rxp = uint32(reg_xp), rw = uint32(reg_w);
-		_setKernelArg(_mul4x2, 1, sizeof(uint32), &rx);
-		_setKernelArg(_mul4x2, 2, sizeof(uint32), &rxp);
-		_setKernelArg(_mul4x2, 3, sizeof(uint32), &rw);
-		_executeKernel(_mul4x2, 2u << (_ln - 3));
-	}
-
-	void mul8(const size_t reg_x, const size_t reg_xp, const size_t reg_w)
-	{
-		const uint32 rx = uint32(reg_x), rxp = uint32(reg_xp), rw = uint32(reg_w);
-		_setKernelArg(_mul8, 1, sizeof(uint32), &rx);
-		_setKernelArg(_mul8, 2, sizeof(uint32), &rxp);
-		_setKernelArg(_mul8, 3, sizeof(uint32), &rw);
-		_executeKernel(_mul8, 2u << (_ln - 3));
-	}
-
-	void fwd4x2(const size_t reg_x, const size_t reg_w)
-	{
-		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
-		_setKernelArg(_fwd4x2, 1, sizeof(uint32), &rx);
-		_setKernelArg(_fwd4x2, 2, sizeof(uint32), &rw);
-		_executeKernel(_fwd4x2, 2u << (_ln - 3));
- 	}
-
-	void fwd8(const size_t reg_x, const size_t reg_w)
-	{
-		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
-		_setKernelArg(_fwd8, 1, sizeof(uint32), &rx);
-		_setKernelArg(_fwd8, 2, sizeof(uint32), &rw);
-		_executeKernel(_fwd8, 2u << (_ln - 3));
-	}
+	void fwd4x2(const size_t reg_x, const size_t reg_w) { execute_kernel(_fwd4x2, reg_x, reg_w); }
+	void fwd8(const size_t reg_x, const size_t reg_w) { execute_kernel(_fwd8, reg_x, reg_w); }
+	void fwd16(const size_t reg_x, const size_t reg_w) { execute_kernel(_fwd16, reg_x, reg_w); }
+	void fwd32(const size_t reg_x, const size_t reg_w) { execute_kernel(_fwd32, reg_x, reg_w); }
+	void fwd64(const size_t reg_x, const size_t reg_w) { execute_kernel(_fwd64, reg_x, reg_w); }
+	void fwd128(const size_t reg_x, const size_t reg_w) { execute_kernel(_fwd128, reg_x, reg_w); }
+	void fwd256(const size_t reg_x, const size_t reg_w) { execute_kernel(_fwd256, reg_x, reg_w); }
+	void fwd512(const size_t reg_x, const size_t reg_w) { execute_kernel(_fwd512, reg_x, reg_w); }
 
 	void carry_mul(const size_t reg_x, const int32 a)
 	{
 		const uint32 rx = uint32(reg_x);
-		_setKernelArg(_carry_mul, 1, sizeof(cl_mem), &_carry);
 		_setKernelArg(_carry_mul, 2, sizeof(uint32), &rx);
 		_setKernelArg(_carry_mul, 3, sizeof(int32), &a);
 		_executeKernel(_carry_mul, (1u << _ln) / CARRY_LENGTH, 1u << _carry_shift);
@@ -275,7 +278,6 @@ public:
 	void carry_sub(const size_t reg_x, const size_t reg_y)
 	{
 		const uint32 rx = uint32(reg_x), ry = uint32(reg_y);
-		_setKernelArg(_carry_sub, 1, sizeof(cl_mem), &_carry);
 		_setKernelArg(_carry_sub, 2, sizeof(uint32), &rx);
 		_setKernelArg(_carry_sub, 3, sizeof(uint32), &ry);
 		_executeKernel(_carry_sub, (1u << _ln) / CARRY_LENGTH, 1u << _carry_shift);
@@ -284,7 +286,6 @@ public:
 	void carry_complete(const size_t reg_x, const bool nega)
 	{
 		const uint32 rx = uint32(reg_x); const int32 is_nega = nega ? 1 : 0;
-		_setKernelArg(_carry_complete, 1, sizeof(cl_mem), &_carry);
 		_setKernelArg(_carry_complete, 2, sizeof(uint32), &rx);
 		_setKernelArg(_carry_complete, 3, sizeof(int32), &is_nega);
 		_executeKernel(_carry_complete, ((1u << _ln) / CARRY_LENGTH) >> _carry_shift);
