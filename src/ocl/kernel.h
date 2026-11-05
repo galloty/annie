@@ -50,6 +50,7 @@ static const char * const src_ocl_kernel = \
 "#define BLK256			2\n" \
 "#define BLK512			1\n" \
 "#define CHUNK64			32\n" \
+"#define CHUNK512		4\n" \
 "#endif\n" \
 "#define BASE			(1u << LBASE)\n" \
 "\n" \
@@ -635,17 +636,17 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "#define DECLARE_VAR_FB64() \\\n" \
 "	const sz_t kl0 = local_id, k0 = kl0 * (N_SZ / 64), ml0 = 8, m0 = ml0 * (N_SZ / 64); \\\n" \
-"	const sz_t kl8 = local_id * 8, k8 = kl8 * (N_SZ / 64), ml8 = 1, m8 = ml8 * (N_SZ / 64);\n" \
+"	const sz_t kl8 = local_id * 8, k8 = kl8 * (N_SZ / 64), ml8 = 1, m8 = ml8 * (N_SZ / 64); \\\n" \
+"	const sz_t sj8 = 8 + local_id;\n" \
 "\n" \
 "__kernel __attribute__((reqd_work_group_size(64 / 8 * CHUNK64, 1, 1)))\n" \
 "void forward64_0(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
 "{\n" \
 "	DECLARE_VAR_FB(64, CHUNK64);\n" \
 "	DECLARE_VAR_FB64();\n" \
-"	const sz_t sj = 8 + local_id;\n" \
 "\n" \
 "	forward8_0i(pq, ml0, &Xt[kl0], m0, &xt[k0], w, g_rsq[lid]);\n" \
-"	forward8o(pq, m8, &xt[k8], ml8, &Xt[kl8], w, sj);\n" \
+"	forward8o(pq, m8, &xt[k8], ml8, &Xt[kl8], w, sj8);\n" \
 "}\n" \
 "\n" \
 "__kernel __attribute__((reqd_work_group_size(64 / 8 * CHUNK64, 1, 1)))\n" \
@@ -653,10 +654,37 @@ static const char * const src_ocl_kernel = \
 "{\n" \
 "	DECLARE_VAR_FB(64, CHUNK64);\n" \
 "	DECLARE_VAR_FB64();\n" \
-"	const sz_t sj = 8 + local_id;\n" \
 "\n" \
-"	backward8i(pq, ml8, &Xt[kl8], m8, &xt[k8], w, sj);\n" \
-"	backward8o(pq, m0, &xt[k0], ml0, &Xt[kl0], w, 1);	// sj / 8\n" \
+"	backward8i(pq, ml8, &Xt[kl8], m8, &xt[k8], w, sj8);\n" \
+"	backward8o(pq, m0, &xt[k0], ml0, &Xt[kl0], w, 1);\n" \
+"}\n" \
+"\n" \
+"#define DECLARE_VAR_FB512() \\\n" \
+"	const sz_t kl0 = local_id, k0 = kl0 * (N_SZ / 512), ml0 = 64, m0 = ml0 * (N_SZ / 512); \\\n" \
+"	const sz_t kl8 = (local_id % 8) + (local_id / 8) * 64, ml8 = 8; \\\n" \
+"	const sz_t kl64 = local_id * 8, k64 = kl64 * (N_SZ / 512), ml64 = 1, m64 = ml64 * (N_SZ / 512); \\\n" \
+"	const sz_t sj64 = 64 + local_id, sj8 = 8 + (local_id / 8) % 8;\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(512 / 8 * CHUNK512, 1, 1)))\n" \
+"void forward512_0(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
+"{\n" \
+"	DECLARE_VAR_FB(512, CHUNK512);\n" \
+"	DECLARE_VAR_FB512();\n" \
+"\n" \
+"	forward8_0i(pq, ml0, &Xt[kl0], m0, &xt[k0], w, g_rsq[lid]);\n" \
+"	forward8l(pq, ml8, &Xt[kl8], w, sj8);\n" \
+"	forward8o(pq, m64, &xt[k64], ml64, &Xt[kl64], w, sj64);\n" \
+"}\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(512 / 8 * CHUNK512, 1, 1)))\n" \
+"void backward512_0(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
+"{\n" \
+"	DECLARE_VAR_FB(512, CHUNK512);\n" \
+"	DECLARE_VAR_FB512();\n" \
+"\n" \
+"	backward8i(pq, ml64, &Xt[kl64], m64, &xt[k64], w, sj64);\n" \
+"	backward8l(pq, ml8, &Xt[kl8], w, sj8);\n" \
+"	backward8o(pq, m0, &xt[k0], ml0, &Xt[kl0], w, 1);\n" \
 "}\n" \
 "\n" \
 "// ---\n" \

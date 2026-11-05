@@ -197,6 +197,7 @@ private:
 
 		if      (ln <= 6) { eng->forward8_0(reg_x, reg_w); }
 		else if (ln <= 9) { eng->forward64_0(reg_x, reg_w); }
+		else if (ln <= 12) { eng->forward512_0(reg_x, reg_w); }
 		else 
 		{
 			int lm = _ln - 3; size_t s = 1;
@@ -213,6 +214,7 @@ private:
 
 		if      (ln <= 6) { eng->backward8_0(reg_x, reg_w); }
 		else if (ln <= 9) { eng->backward64_0(reg_x, reg_w); }
+		else if (ln <= 12) { eng->backward512_0(reg_x, reg_w); }
 		else
 		{
 			size_t s = _s0;
@@ -233,6 +235,9 @@ private:
 		else if (ln == 7) {}
 		else if (ln == 8) eng->fwd4x2(reg_x, reg_w);
 		else if (ln == 9) eng->fwd8(reg_x, reg_w);
+		else if (ln == 10) {}
+		else if (ln == 11) eng->fwd4x2(reg_x, reg_w);
+		else if (ln == 12) eng->fwd8(reg_x, reg_w);
 		else
 		{
 			const int lm0 = _lm0;
@@ -260,6 +265,9 @@ private:
 		else if (ln == 7) eng->square2x4(reg_x, reg_w);
 		else if (ln == 8) eng->square4x2(reg_x, reg_w);
 		else if (ln == 9) eng->square8(reg_x, reg_w);
+		else if (ln == 10) eng->square2x4(reg_x, reg_w);
+		else if (ln == 11) eng->square4x2(reg_x, reg_w);
+		else if (ln == 12) eng->square8(reg_x, reg_w);
 		else
 		{
 			const int lm0 = _lm0;
@@ -290,6 +298,9 @@ private:
 		else if (ln == 7) eng->mul2x4(reg_y, reg_x, reg_w);
 		else if (ln == 8) eng->mul4x2(reg_y, reg_x, reg_w);
 		else if (ln == 9) eng->mul8(reg_y, reg_x, reg_w);
+		else if (ln == 10) eng->mul2x4(reg_y, reg_x, reg_w);
+		else if (ln == 11) eng->mul4x2(reg_y, reg_x, reg_w);
+		else if (ln == 12) eng->mul8(reg_y, reg_x, reg_w);
 		else
 		{
 			const int lm0 = _lm0;
@@ -488,12 +499,16 @@ public:
 		std::cout << "ln = " << ln << ": ";
 		if      (ln <= 6) std::cout << "forward8_0";
 		else if (ln <= 9) std::cout << "forward64_0";
+		else if (ln <= 12) std::cout << "forward512_0";
 		if      (ln == 4) std::cout << " square2x4";
 		else if (ln == 5) std::cout << " square4x2";
 		else if (ln == 6) std::cout << " square8";
 		else if (ln == 7) std::cout << " square2x4";
 		else if (ln == 8) std::cout << " square4x2";
 		else if (ln == 9) std::cout << " square8";
+		else if (ln == 10) std::cout << " square2x4";
+		else if (ln == 11) std::cout << " square4x2";
+		else if (ln == 12) std::cout << " square8";
 		else
 		{
 			lm = ln - 3; s = 1;
@@ -546,6 +561,7 @@ public:
 		src << "#define BLK512\t" << BLK512 << std::endl;
 
 		src << "#define CHUNK64\t" << CHUNK64 << std::endl;
+		src << "#define CHUNK512\t" << CHUNK512 << std::endl;
 
 // std::cout << src.str() << std::endl;
 		if (!eng->readOpenCL("ocl/kernel.cl", "src/ocl/kernel.h", "src_ocl_kernel", src)) src << src_ocl_kernel;

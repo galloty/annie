@@ -38,8 +38,8 @@ public:
 #define BLK1024		 1	// local size = 1024 * BLK1024 * sizeof(ZP) = 4KB, workgroup size = 1024 / 8 * BLK1024 = 128
 #define BLK2048		 1	// local size = 2048 * BLK2048 * sizeof(ZP) = 8KB, workgroup size = 2048 / 8 * BLK2048 = 256
 
-#define CHUNK64		 1	// TODO 32	// local size = 64 * CHUNK64 * sizeof(ZP) = 8KB, workgroup size = 64 / 8 * CHUNK64 = 256
-#define CHUNK512	 1	// TODO  4	// local size = 512 * CHUNK512 * sizeof(ZP) = 8KB, workgroup size = 512 / 8 * CHUNK512 = 256
+#define CHUNK64		 2	// TODO 32	// local size = 64 * CHUNK64 * sizeof(ZP) = 8KB, workgroup size = 64 / 8 * CHUNK64 = 256
+#define CHUNK512	 2	// TODO  4	// local size = 512 * CHUNK512 * sizeof(ZP) = 8KB, workgroup size = 512 / 8 * CHUNK512 = 256
 
 #define CREATE_KERNEL(name) _##name = create_kernel(#name);
 #define CREATE_KERNEL_CARRY(name) _##name = create_kernel_carry(#name);
@@ -53,7 +53,7 @@ private:
 	cl_mem _reg, _carry;
 
 	cl_kernel _forward8 = nullptr, _backward8 = nullptr, _forward8_0 = nullptr, _backward8_0 = nullptr;
-	cl_kernel _forward64_0 = nullptr, _backward64_0 = nullptr;
+	cl_kernel _forward64_0 = nullptr, _backward64_0 = nullptr, _forward512_0 = nullptr, _backward512_0 = nullptr;;
 	cl_kernel _square2x4 = nullptr, _square4x2 = nullptr, _square8 = nullptr;
 	cl_kernel _square16 = nullptr, _square32 = nullptr, _square64 = nullptr;
 	cl_kernel _square128 = nullptr, _square256 = nullptr, _square512 = nullptr;
@@ -148,6 +148,8 @@ public:
 		CREATE_KERNEL(backward8_0);
 		CREATE_KERNEL(forward64_0);
 		CREATE_KERNEL(backward64_0);
+		CREATE_KERNEL(forward512_0);
+		CREATE_KERNEL(backward512_0);
 
 		CREATE_KERNEL(square2x4);
 		CREATE_KERNEL(square4x2);
@@ -247,18 +249,10 @@ public:
 
 	void forward8_0(const size_t reg_x, const size_t reg_w) { execute_kernel(_forward8_0, reg_x, reg_w); }
 	void backward8_0(const size_t reg_x, const size_t reg_w) { execute_kernel(_backward8_0, reg_x, reg_w); }
-
 	void forward64_0(const size_t reg_x, const size_t reg_w) { execute_kernel(_forward64_0, reg_x, reg_w, 64 / 8 * CHUNK64); }
-	// {
-	// 	execute_kernel(_forward8_0, reg_x, reg_w);
-	// 	execute_kernel_fb(_forward8, reg_x, reg_w, _ln - 6, 8);
-	// }
-
 	void backward64_0(const size_t reg_x, const size_t reg_w) { execute_kernel(_backward64_0, reg_x, reg_w, 64 / 8 * CHUNK64); }
-	// {
-	// 	execute_kernel_fb(_backward8, reg_x, reg_w, _ln - 6, 8);
-	// 	execute_kernel(_backward8_0, reg_x, reg_w);
-	// }
+	void forward512_0(const size_t reg_x, const size_t reg_w) { execute_kernel(_forward512_0, reg_x, reg_w, 512 / 8 * CHUNK512); }
+	void backward512_0(const size_t reg_x, const size_t reg_w) { execute_kernel(_backward512_0, reg_x, reg_w, 512 / 8 * CHUNK512); }
 
 	void square2x4(const size_t reg_x, const size_t reg_w) { execute_kernel(_square2x4, reg_x, reg_w); }
 	void square4x2(const size_t reg_x, const size_t reg_w) { execute_kernel(_square4x2, reg_x, reg_w); }

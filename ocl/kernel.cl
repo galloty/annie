@@ -38,6 +38,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define BLK256			2
 #define BLK512			1
 #define CHUNK64			32
+#define CHUNK512		4
 #endif
 #define BASE			(1u << LBASE)
 
@@ -623,17 +624,17 @@ void fwd16(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32
 
 #define DECLARE_VAR_FB64() \
 	const sz_t kl0 = local_id, k0 = kl0 * (N_SZ / 64), ml0 = 8, m0 = ml0 * (N_SZ / 64); \
-	const sz_t kl8 = local_id * 8, k8 = kl8 * (N_SZ / 64), ml8 = 1, m8 = ml8 * (N_SZ / 64);
+	const sz_t kl8 = local_id * 8, k8 = kl8 * (N_SZ / 64), ml8 = 1, m8 = ml8 * (N_SZ / 64); \
+	const sz_t sj8 = 8 + local_id;
 
 __kernel __attribute__((reqd_work_group_size(64 / 8 * CHUNK64, 1, 1)))
 void forward64_0(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
 	DECLARE_VAR_FB(64, CHUNK64);
 	DECLARE_VAR_FB64();
-	const sz_t sj = 8 + local_id;
 
 	forward8_0i(pq, ml0, &Xt[kl0], m0, &xt[k0], w, g_rsq[lid]);
-	forward8o(pq, m8, &xt[k8], ml8, &Xt[kl8], w, sj);
+	forward8o(pq, m8, &xt[k8], ml8, &Xt[kl8], w, sj8);
 }
 
 __kernel __attribute__((reqd_work_group_size(64 / 8 * CHUNK64, 1, 1)))
@@ -641,10 +642,37 @@ void backward64_0(__global ZP * restrict const regm, const uint_32 reg_x, const 
 {
 	DECLARE_VAR_FB(64, CHUNK64);
 	DECLARE_VAR_FB64();
-	const sz_t sj = 8 + local_id;
 
-	backward8i(pq, ml8, &Xt[kl8], m8, &xt[k8], w, sj);
-	backward8o(pq, m0, &xt[k0], ml0, &Xt[kl0], w, 1);	// sj / 8
+	backward8i(pq, ml8, &Xt[kl8], m8, &xt[k8], w, sj8);
+	backward8o(pq, m0, &xt[k0], ml0, &Xt[kl0], w, 1);
+}
+
+#define DECLARE_VAR_FB512() \
+	const sz_t kl0 = local_id, k0 = kl0 * (N_SZ / 512), ml0 = 64, m0 = ml0 * (N_SZ / 512); \
+	const sz_t kl8 = (local_id % 8) + (local_id / 8) * 64, ml8 = 8; \
+	const sz_t kl64 = local_id * 8, k64 = kl64 * (N_SZ / 512), ml64 = 1, m64 = ml64 * (N_SZ / 512); \
+	const sz_t sj64 = 64 + local_id, sj8 = 8 + (local_id / 8) % 8;
+
+__kernel __attribute__((reqd_work_group_size(512 / 8 * CHUNK512, 1, 1)))
+void forward512_0(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
+{
+	DECLARE_VAR_FB(512, CHUNK512);
+	DECLARE_VAR_FB512();
+
+	forward8_0i(pq, ml0, &Xt[kl0], m0, &xt[k0], w, g_rsq[lid]);
+	forward8l(pq, ml8, &Xt[kl8], w, sj8);
+	forward8o(pq, m64, &xt[k64], ml64, &Xt[kl64], w, sj64);
+}
+
+__kernel __attribute__((reqd_work_group_size(512 / 8 * CHUNK512, 1, 1)))
+void backward512_0(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
+{
+	DECLARE_VAR_FB(512, CHUNK512);
+	DECLARE_VAR_FB512();
+
+	backward8i(pq, ml64, &Xt[kl64], m64, &xt[k64], w, sj64);
+	backward8l(pq, ml8, &Xt[kl8], w, sj8);
+	backward8o(pq, m0, &xt[k0], ml0, &Xt[kl0], w, 1);
 }
 
 // ---
