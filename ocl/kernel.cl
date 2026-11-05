@@ -37,6 +37,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define BLK128			4
 #define BLK256			2
 #define BLK512			1
+#define CHUNK64			32
 #endif
 #define BASE			(1u << LBASE)
 
@@ -242,6 +243,7 @@ INLINE void _fwd8(const ZP2 pq, ZP x[8], const ZP w1, const ZP2 w2)
 	DECLARE_W2I2(); \
 	const ZP w1 = load1g(w, sj), w1_i = load1g(w_i, sj);
 
+// ---
 
 INLINE void forward8g(const ZP2 pq, const sz_t m, __global ZP * restrict const x,
 	__global const ZP * restrict const w, const sz_t sj)
@@ -288,6 +290,15 @@ INLINE void backward8g(const ZP2 pq, const sz_t m, __global ZP * restrict const 
 	STOREG(m);
 }
 
+INLINE void backward8i(const ZP2 pq, const sz_t ml, __local ZP * restrict const X, const sz_t mg,
+	__global ZP * restrict const x, __global const ZP * restrict const w, const sz_t sj)
+{
+	DECLARE_WI124();
+	LOADG(mg);
+	_backward8(pq, xl, w1_i, w2_i, w4_i);
+	STOREL(ml);
+}
+
 INLINE void backward8l(const ZP2 pq, const sz_t m, __local ZP * restrict const X,
 	__global const ZP * restrict const w, const sz_t sj)
 {
@@ -316,6 +327,15 @@ INLINE void forward8_0g(const ZP2 pq, const sz_t m, __global ZP * restrict const
 	STOREG(m);
 }
 
+INLINE void forward8_0i(const ZP2 pq,const sz_t ml, __local ZP * restrict const X, const sz_t mg,
+	__global ZP * restrict const x, __global const ZP * restrict const w, const ZP rsq)
+{
+	DECLARE_W124_0();
+	LOADG(mg);
+	_forward8_0(pq, xl, w1, w2, w4, rsq);
+	STOREL(ml);
+}
+
 INLINE void square2x4g(const ZP2 pq, __global ZP * restrict const x,
 	__global const ZP * restrict const w, const sz_t sj)
 {
@@ -333,7 +353,6 @@ INLINE void square2x4l(const ZP2 pq, __local ZP * restrict const X,
 	_square2x4(pq, xl, w2);
 	STOREL(1);
 }
-
 
 INLINE void square4x2g(const ZP2 pq, __global ZP * restrict const x,
 	__global const ZP * restrict const w, const sz_t sj)
@@ -505,6 +524,16 @@ void forward8_0(__global ZP * restrict const regm, const uint_32 reg_x, const ui
 }
 
 __kernel
+void backward8_0(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
+{
+	DECLARE_VAR_REG();
+	const sz_t m = N_SZ / 8, sj = 1, k = id;
+	backward8g(pq, m, &x[k], w, sj);
+}
+
+// ---
+
+__kernel
 void square2x4(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
 	DECLARE_VAR_REG();
@@ -527,6 +556,8 @@ void square8(__global ZP * restrict const regm, const uint_32 reg_x, const uint_
 	const sz_t sj = N_SZ / 8 + id, k = 8 * id;
 	square8g(pq, &x[k], w, sj);
 }
+
+// ---
 
 __kernel
 void mul2x4(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)
@@ -555,6 +586,8 @@ void mul8(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 
 	mul8g(pq, &x[k], &xp[k], w, sj);
 }
 
+// ---
+
 __kernel
 void fwd4x2(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
@@ -580,6 +613,41 @@ void fwd16(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32
 }
 
 // --- transform using local mem ---
+
+#define DECLARE_VAR_FB(N, CHUNK_N) \
+	__local ZP X[N * CHUNK_N]; \
+	DECLARE_VAR_REG(); \
+	const size_t chunk_id = id % CHUNK_N, local_id = (id / CHUNK_N) % (N / 8), block_id = id & ~(N / 8 * CHUNK_N - 1); \
+	__global ZP * restrict const xt = &x[block_id / (N / 8) + chunk_id]; \
+	__local ZP * const Xt = &X[N * chunk_id];
+
+#define DECLARE_VAR_FB64() \
+	const sz_t kl0 = local_id, k0 = kl0 * (N_SZ / 64), ml0 = 8, m0 = ml0 * (N_SZ / 64); \
+	const sz_t kl8 = local_id * 8, k8 = kl8 * (N_SZ / 64), ml8 = 1, m8 = ml8 * (N_SZ / 64);
+
+__kernel __attribute__((reqd_work_group_size(64 / 8 * CHUNK64, 1, 1)))
+void forward64_0(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
+{
+	DECLARE_VAR_FB(64, CHUNK64);
+	DECLARE_VAR_FB64();
+	const sz_t sj = 8 + local_id;
+
+	forward8_0i(pq, ml0, &Xt[kl0], m0, &xt[k0], w, g_rsq[lid]);
+	forward8o(pq, m8, &xt[k8], ml8, &Xt[kl8], w, sj);
+}
+
+__kernel __attribute__((reqd_work_group_size(64 / 8 * CHUNK64, 1, 1)))
+void backward64_0(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
+{
+	DECLARE_VAR_FB(64, CHUNK64);
+	DECLARE_VAR_FB64();
+	const sz_t sj = 8 + local_id;
+
+	backward8i(pq, ml8, &Xt[kl8], m8, &xt[k8], w, sj);
+	backward8o(pq, m0, &xt[k0], ml0, &Xt[kl0], w, 1);	// sj / 8
+}
+
+// ---
 
 #define DECLARE_VAR_SQRMUL(N, BLK_N) \
 	__local ZP X[N * BLK_N]; \
@@ -660,6 +728,8 @@ void square512(__global ZP * restrict const regm, const uint_32 reg_x, const uin
 	backward8o(pq, 64, &x[k64], 64, &Xb[k64 % 512], w, sj / 64);
 }
 
+// ---
+
 __kernel __attribute__((reqd_work_group_size(16 / 8 * BLK16, 1, 1)))
 void mul16(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)
 {
@@ -737,6 +807,8 @@ void mul512(__global ZP * restrict const regm, const uint_32 reg_x, const uint_3
 	backward8l(pq, 8, &Xb[k8 % 512], w, sj / 8);
 	backward8o(pq, 64, &x[k64], 64, &Xb[k64 % 512], w, sj / 64);
 }
+
+// ---
 
 __kernel __attribute__((reqd_work_group_size(32 / 8 * BLK32, 1, 1)))
 void fwd32(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)

@@ -49,6 +49,7 @@ static const char * const src_ocl_kernel = \
 "#define BLK128			4\n" \
 "#define BLK256			2\n" \
 "#define BLK512			1\n" \
+"#define CHUNK64			32\n" \
 "#endif\n" \
 "#define BASE			(1u << LBASE)\n" \
 "\n" \
@@ -254,6 +255,7 @@ static const char * const src_ocl_kernel = \
 "	DECLARE_W2I2(); \\\n" \
 "	const ZP w1 = load1g(w, sj), w1_i = load1g(w_i, sj);\n" \
 "\n" \
+"// ---\n" \
 "\n" \
 "INLINE void forward8g(const ZP2 pq, const sz_t m, __global ZP * restrict const x,\n" \
 "	__global const ZP * restrict const w, const sz_t sj)\n" \
@@ -300,6 +302,15 @@ static const char * const src_ocl_kernel = \
 "	STOREG(m);\n" \
 "}\n" \
 "\n" \
+"INLINE void backward8i(const ZP2 pq, const sz_t ml, __local ZP * restrict const X, const sz_t mg,\n" \
+"	__global ZP * restrict const x, __global const ZP * restrict const w, const sz_t sj)\n" \
+"{\n" \
+"	DECLARE_WI124();\n" \
+"	LOADG(mg);\n" \
+"	_backward8(pq, xl, w1_i, w2_i, w4_i);\n" \
+"	STOREL(ml);\n" \
+"}\n" \
+"\n" \
 "INLINE void backward8l(const ZP2 pq, const sz_t m, __local ZP * restrict const X,\n" \
 "	__global const ZP * restrict const w, const sz_t sj)\n" \
 "{\n" \
@@ -328,6 +339,15 @@ static const char * const src_ocl_kernel = \
 "	STOREG(m);\n" \
 "}\n" \
 "\n" \
+"INLINE void forward8_0i(const ZP2 pq,const sz_t ml, __local ZP * restrict const X, const sz_t mg,\n" \
+"	__global ZP * restrict const x, __global const ZP * restrict const w, const ZP rsq)\n" \
+"{\n" \
+"	DECLARE_W124_0();\n" \
+"	LOADG(mg);\n" \
+"	_forward8_0(pq, xl, w1, w2, w4, rsq);\n" \
+"	STOREL(ml);\n" \
+"}\n" \
+"\n" \
 "INLINE void square2x4g(const ZP2 pq, __global ZP * restrict const x,\n" \
 "	__global const ZP * restrict const w, const sz_t sj)\n" \
 "{\n" \
@@ -345,7 +365,6 @@ static const char * const src_ocl_kernel = \
 "	_square2x4(pq, xl, w2);\n" \
 "	STOREL(1);\n" \
 "}\n" \
-"\n" \
 "\n" \
 "INLINE void square4x2g(const ZP2 pq, __global ZP * restrict const x,\n" \
 "	__global const ZP * restrict const w, const sz_t sj)\n" \
@@ -517,6 +536,16 @@ static const char * const src_ocl_kernel = \
 "}\n" \
 "\n" \
 "__kernel\n" \
+"void backward8_0(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
+"{\n" \
+"	DECLARE_VAR_REG();\n" \
+"	const sz_t m = N_SZ / 8, sj = 1, k = id;\n" \
+"	backward8g(pq, m, &x[k], w, sj);\n" \
+"}\n" \
+"\n" \
+"// ---\n" \
+"\n" \
+"__kernel\n" \
 "void square2x4(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
 "{\n" \
 "	DECLARE_VAR_REG();\n" \
@@ -539,6 +568,8 @@ static const char * const src_ocl_kernel = \
 "	const sz_t sj = N_SZ / 8 + id, k = 8 * id;\n" \
 "	square8g(pq, &x[k], w, sj);\n" \
 "}\n" \
+"\n" \
+"// ---\n" \
 "\n" \
 "__kernel\n" \
 "void mul2x4(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
@@ -567,6 +598,8 @@ static const char * const src_ocl_kernel = \
 "	mul8g(pq, &x[k], &xp[k], w, sj);\n" \
 "}\n" \
 "\n" \
+"// ---\n" \
+"\n" \
 "__kernel\n" \
 "void fwd4x2(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
 "{\n" \
@@ -592,6 +625,41 @@ static const char * const src_ocl_kernel = \
 "}\n" \
 "\n" \
 "// --- transform using local mem ---\n" \
+"\n" \
+"#define DECLARE_VAR_FB(N, CHUNK_N) \\\n" \
+"	__local ZP X[N * CHUNK_N]; \\\n" \
+"	DECLARE_VAR_REG(); \\\n" \
+"	const size_t chunk_id = id % CHUNK_N, local_id = (id / CHUNK_N) % (N / 8), block_id = id & ~(N / 8 * CHUNK_N - 1); \\\n" \
+"	__global ZP * restrict const xt = &x[block_id / (N / 8) + chunk_id]; \\\n" \
+"	__local ZP * const Xt = &X[N * chunk_id];\n" \
+"\n" \
+"#define DECLARE_VAR_FB64() \\\n" \
+"	const sz_t kl0 = local_id, k0 = kl0 * (N_SZ / 64), ml0 = 8, m0 = ml0 * (N_SZ / 64); \\\n" \
+"	const sz_t kl8 = local_id * 8, k8 = kl8 * (N_SZ / 64), ml8 = 1, m8 = ml8 * (N_SZ / 64);\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(64 / 8 * CHUNK64, 1, 1)))\n" \
+"void forward64_0(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
+"{\n" \
+"	DECLARE_VAR_FB(64, CHUNK64);\n" \
+"	DECLARE_VAR_FB64();\n" \
+"	const sz_t sj = 8 + local_id;\n" \
+"\n" \
+"	forward8_0i(pq, ml0, &Xt[kl0], m0, &xt[k0], w, g_rsq[lid]);\n" \
+"	forward8o(pq, m8, &xt[k8], ml8, &Xt[kl8], w, sj);\n" \
+"}\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(64 / 8 * CHUNK64, 1, 1)))\n" \
+"void backward64_0(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
+"{\n" \
+"	DECLARE_VAR_FB(64, CHUNK64);\n" \
+"	DECLARE_VAR_FB64();\n" \
+"	const sz_t sj = 8 + local_id;\n" \
+"\n" \
+"	backward8i(pq, ml8, &Xt[kl8], m8, &xt[k8], w, sj);\n" \
+"	backward8o(pq, m0, &xt[k0], ml0, &Xt[kl0], w, 1);	// sj / 8\n" \
+"}\n" \
+"\n" \
+"// ---\n" \
 "\n" \
 "#define DECLARE_VAR_SQRMUL(N, BLK_N) \\\n" \
 "	__local ZP X[N * BLK_N]; \\\n" \
@@ -672,6 +740,8 @@ static const char * const src_ocl_kernel = \
 "	backward8o(pq, 64, &x[k64], 64, &Xb[k64 % 512], w, sj / 64);\n" \
 "}\n" \
 "\n" \
+"// ---\n" \
+"\n" \
 "__kernel __attribute__((reqd_work_group_size(16 / 8 * BLK16, 1, 1)))\n" \
 "void mul16(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
 "{\n" \
@@ -749,6 +819,8 @@ static const char * const src_ocl_kernel = \
 "	backward8l(pq, 8, &Xb[k8 % 512], w, sj / 8);\n" \
 "	backward8o(pq, 64, &x[k64], 64, &Xb[k64 % 512], w, sj / 64);\n" \
 "}\n" \
+"\n" \
+"// ---\n" \
 "\n" \
 "__kernel __attribute__((reqd_work_group_size(32 / 8 * BLK32, 1, 1)))\n" \
 "void fwd32(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
