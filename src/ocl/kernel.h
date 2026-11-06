@@ -1028,29 +1028,54 @@ static const char * const src_ocl_kernel = \
 "}\n" \
 "\n" \
 "// b-1, b-1, ..., b-1, b + a, ... => b, 0, ..., 0, a, ...\n" \
-"INLINE void fix_base(__global ZP * restrict const x)\n" \
+"// fix[0] = index of the digit below the run of b-1 (fix_scan), fix[1] = fix[0] if fix_zero must clear the run, -1 otherwise\n" \
+"__kernel\n" \
+"void fix_reset(__global ZP * restrict const reg, __global int_32 * restrict const fix)\n" \
+"{\n" \
+"	fix[0] = 0; fix[1] = -1;\n" \
+"}\n" \
+"\n" \
+"__kernel\n" \
+"void fix_scan(__global ZP * restrict const reg, __global int_32 * restrict const fix, const uint_32 reg_x)\n" \
+"{\n" \
+"	const sz_t id = (sz_t)get_global_id(0);\n" \
+"	__global const ZP * restrict const x = &reg[reg_x * N_SZ];\n" \
+"\n" \
+"	if ((id == 0) || (id > N_SZ - 2) || (x[N_SZ - 1] != BASE - 1)) return;\n" \
+"	if ((x[id] != BASE - 1) && ((id == N_SZ - 2) || (x[id + 1] == BASE - 1))) atomic_max(&fix[0], (int_32)(id));\n" \
+"}\n" \
+"\n" \
+"__kernel\n" \
+"void fix_zero(__global ZP * restrict const reg, __global const int_32 * restrict const fix, const uint_32 reg_x)\n" \
+"{\n" \
+"	const sz_t id = (sz_t)get_global_id(0);\n" \
+"	const int_32 i = fix[1];\n" \
+"\n" \
+"	if ((i < 0) || (id <= (sz_t)(i)) || (id > N_SZ - 2)) return;\n" \
+"	__global ZP * restrict const x = &reg[reg_x * N_SZ];\n" \
+"	x[id] = 0; x[id + Z_OFFSET] = 0;\n" \
+"}\n" \
+"\n" \
+"INLINE void fix_base(__global ZP * restrict const x, __global int_32 * restrict const fix)\n" \
 "{\n" \
 "	if (x[N_SZ - 1] == BASE - 1)\n" \
 "	{\n" \
-"		sz_t i = 2; for (; i < N_SZ; ++i) { if (x[N_SZ - i] != BASE - 1) break; }\n" \
-"		if (get_int(x[N_SZ - i], P1) >= (int_32)(BASE))\n" \
+"		const sz_t i = (sz_t)(fix[0]);\n" \
+"		if (get_int(x[i], P1) >= (int_32)(BASE))\n" \
 "		{\n" \
-"			x[N_SZ - i] -= BASE; x[N_SZ - i + Z_OFFSET] -= BASE;\n" \
-"			for (sz_t j = i - 1; j >= 2; --j)\n" \
-"			{\n" \
-"				x[N_SZ - j] = 0; x[N_SZ - j + Z_OFFSET] = 0;\n" \
-"			}\n" \
+"			x[i] -= BASE; x[i + Z_OFFSET] -= BASE;\n" \
+"			fix[1] = (int_32)(i);\n" \
 "			x[N_SZ - 1] = BASE; x[N_SZ - 1 + Z_OFFSET] = BASE;\n" \
 "		}\n" \
 "	}\n" \
 "}\n" \
 "\n" \
 "__kernel\n" \
-"void mod_Q(__global ZP * restrict const reg, const uint_32 reg_x)\n" \
+"void mod_Q(__global ZP * restrict const reg, __global int_32 * restrict const fix, const uint_32 reg_x)\n" \
 "{\n" \
 "	__global ZP * restrict const x = &reg[reg_x * N_SZ];\n" \
 "\n" \
-"	fix_base(x);\n" \
+"	fix_base(x, fix);\n" \
 "\n" \
 "	int_32 hi = get_int(x[N_SZ - 1], P1);\n" \
 "	if (hi < 0)\n" \
@@ -1070,11 +1095,11 @@ static const char * const src_ocl_kernel = \
 "}\n" \
 "\n" \
 "__kernel\n" \
-"void mod_R_add2(__global ZP * restrict const reg, const uint_32 reg_x)\n" \
+"void mod_R_add2(__global ZP * restrict const reg, __global int_32 * restrict const fix, const uint_32 reg_x)\n" \
 "{\n" \
 "	__global ZP * restrict const x = &reg[reg_x * N_SZ];\n" \
 "\n" \
-"	fix_base(x);\n" \
+"	fix_base(x, fix);\n" \
 "\n" \
 "	int_32 hi = get_int(x[N_SZ - 1], P1), lo = get_int(x[0], P1);\n" \
 "	if (hi < 0)\n" \

@@ -1113,29 +1113,54 @@ INLINE void set_rns(__global ZP * restrict const x, const int i)
 }
 
 // b-1, b-1, ..., b-1, b + a, ... => b, 0, ..., 0, a, ...
-INLINE void fix_base(__global ZP * restrict const x)
+// fix[0] = index of the digit below the run of b-1 (fix_scan), fix[1] = fix[0] if fix_zero must clear the run, -1 otherwise
+__kernel
+void fix_reset(__global ZP * restrict const reg, __global int_32 * restrict const fix)
+{
+	fix[0] = 0; fix[1] = -1;
+}
+
+__kernel
+void fix_scan(__global ZP * restrict const reg, __global int_32 * restrict const fix, const uint_32 reg_x)
+{
+	const sz_t id = (sz_t)get_global_id(0);
+	__global const ZP * restrict const x = &reg[reg_x * N_SZ];
+
+	if ((id == 0) || (id > N_SZ - 2) || (x[N_SZ - 1] != BASE - 1)) return;
+	if ((x[id] != BASE - 1) && ((id == N_SZ - 2) || (x[id + 1] == BASE - 1))) atomic_max(&fix[0], (int_32)(id));
+}
+
+__kernel
+void fix_zero(__global ZP * restrict const reg, __global const int_32 * restrict const fix, const uint_32 reg_x)
+{
+	const sz_t id = (sz_t)get_global_id(0);
+	const int_32 i = fix[1];
+
+	if ((i < 0) || (id <= (sz_t)(i)) || (id > N_SZ - 2)) return;
+	__global ZP * restrict const x = &reg[reg_x * N_SZ];
+	x[id] = 0; x[id + Z_OFFSET] = 0;
+}
+
+INLINE void fix_base(__global ZP * restrict const x, __global int_32 * restrict const fix)
 {
 	if (x[N_SZ - 1] == BASE - 1)
 	{
-		sz_t i = 2; for (; i < N_SZ; ++i) { if (x[N_SZ - i] != BASE - 1) break; }
-		if (get_int(x[N_SZ - i], P1) >= (int_32)(BASE))
+		const sz_t i = (sz_t)(fix[0]);
+		if (get_int(x[i], P1) >= (int_32)(BASE))
 		{
-			x[N_SZ - i] -= BASE; x[N_SZ - i + Z_OFFSET] -= BASE;
-			for (sz_t j = i - 1; j >= 2; --j)
-			{
-				x[N_SZ - j] = 0; x[N_SZ - j + Z_OFFSET] = 0;
-			}
+			x[i] -= BASE; x[i + Z_OFFSET] -= BASE;
+			fix[1] = (int_32)(i);
 			x[N_SZ - 1] = BASE; x[N_SZ - 1 + Z_OFFSET] = BASE;
 		}
 	}
 }
 
 __kernel
-void mod_Q(__global ZP * restrict const reg, const uint_32 reg_x)
+void mod_Q(__global ZP * restrict const reg, __global int_32 * restrict const fix, const uint_32 reg_x)
 {
 	__global ZP * restrict const x = &reg[reg_x * N_SZ];
 
-	fix_base(x);
+	fix_base(x, fix);
 
 	int_32 hi = get_int(x[N_SZ - 1], P1);
 	if (hi < 0)
@@ -1155,11 +1180,11 @@ void mod_Q(__global ZP * restrict const reg, const uint_32 reg_x)
 }
 
 __kernel
-void mod_R_add2(__global ZP * restrict const reg, const uint_32 reg_x)
+void mod_R_add2(__global ZP * restrict const reg, __global int_32 * restrict const fix, const uint_32 reg_x)
 {
 	__global ZP * restrict const x = &reg[reg_x * N_SZ];
 
-	fix_base(x);
+	fix_base(x, fix);
 
 	int_32 hi = get_int(x[N_SZ - 1], P1), lo = get_int(x[0], P1);
 	if (hi < 0)
