@@ -55,14 +55,14 @@ private:
 	cl_kernel _forward8 = nullptr, _backward8 = nullptr, _forward8_0 = nullptr, _backward8_0 = nullptr;
 	cl_kernel _forward64_0 = nullptr, _backward64_0 = nullptr, _forward512_0 = nullptr, _backward512_0 = nullptr;;
 	cl_kernel _square2x4 = nullptr, _square4x2 = nullptr, _square8 = nullptr;
-	cl_kernel _square16 = nullptr, _square32 = nullptr, _square64 = nullptr;
-	cl_kernel _square128 = nullptr, _square256 = nullptr, _square512 = nullptr;
+	cl_kernel _square16 = nullptr, _square32 = nullptr, _square64 = nullptr, _square128 = nullptr;
+	cl_kernel _square256 = nullptr, _square512 = nullptr, _square1024 = nullptr, _square2048 = nullptr;
 	cl_kernel _mul2x4 = nullptr, _mul4x2 = nullptr, _mul8 = nullptr;
-	cl_kernel _mul16 = nullptr, _mul32 = nullptr, _mul64 = nullptr;
-	cl_kernel _mul128 = nullptr, _mul256 = nullptr, _mul512 = nullptr;
+	cl_kernel _mul16 = nullptr, _mul32 = nullptr, _mul64 = nullptr, _mul128 = nullptr;
+	cl_kernel _mul256 = nullptr, _mul512 = nullptr, _mul1024 = nullptr, _mul2048 = nullptr;
 	cl_kernel _fwd4x2 = nullptr, _fwd8 = nullptr;
-	cl_kernel _fwd16 = nullptr, _fwd32 = nullptr, _fwd64 = nullptr;
-	cl_kernel _fwd128 = nullptr, _fwd256 = nullptr, _fwd512 = nullptr;
+	cl_kernel _fwd16 = nullptr, _fwd32 = nullptr, _fwd64 = nullptr, _fwd128 = nullptr;
+	cl_kernel _fwd256 = nullptr, _fwd512 = nullptr, _fwd1024 = nullptr, _fwd2048 = nullptr;
 	cl_kernel _carry_mul = nullptr, _carry_sub = nullptr, _carry_complete = nullptr;
 	cl_kernel _mod_Q = nullptr, _mod_R_add2 = nullptr;
 	cl_kernel _set = nullptr, _extend = nullptr;
@@ -160,6 +160,8 @@ public:
 		CREATE_KERNEL(square128);
 		CREATE_KERNEL(square256);
 		CREATE_KERNEL(square512);
+		CREATE_KERNEL(square1024);
+		CREATE_KERNEL(square2048);
 
 		CREATE_KERNEL(mul2x4);
 		CREATE_KERNEL(mul4x2);
@@ -170,6 +172,8 @@ public:
 		CREATE_KERNEL(mul128);
 		CREATE_KERNEL(mul256);
 		CREATE_KERNEL(mul512);
+		CREATE_KERNEL(mul1024);
+		CREATE_KERNEL(mul2048);
 
 		CREATE_KERNEL(fwd4x2);
 		CREATE_KERNEL(fwd8);
@@ -179,6 +183,8 @@ public:
 		CREATE_KERNEL(fwd128);
 		CREATE_KERNEL(fwd256);
 		CREATE_KERNEL(fwd512);
+		CREATE_KERNEL(fwd1024);
+		CREATE_KERNEL(fwd2048);
 
 		CREATE_KERNEL_CARRY(carry_mul);
 		CREATE_KERNEL_CARRY(carry_sub);
@@ -263,6 +269,8 @@ public:
 	void square128(const size_t reg_x, const size_t reg_w) { execute_kernel(_square128, reg_x, reg_w, 128 / 8 * BLK128); }
 	void square256(const size_t reg_x, const size_t reg_w) { execute_kernel(_square256, reg_x, reg_w, 256 / 8 * BLK256); }
 	void square512(const size_t reg_x, const size_t reg_w) { execute_kernel(_square512, reg_x, reg_w, 512 / 8 * BLK512); }
+	void square1024(const size_t reg_x, const size_t reg_w) { execute_kernel(_square1024, reg_x, reg_w, 1024 / 8 * BLK1024); }
+	void square2048(const size_t reg_x, const size_t reg_w) { execute_kernel(_square2048, reg_x, reg_w, 2048 / 8 * BLK2048); }
 
 	void mul2x4(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul2x4, reg_x, reg_xp, reg_w); }
 	void mul4x2(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul4x2, reg_x, reg_xp, reg_w); }
@@ -273,6 +281,8 @@ public:
 	void mul128(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul128, reg_x, reg_xp, reg_w, 128 / 8 * BLK128); }
 	void mul256(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul256, reg_x, reg_xp, reg_w, 256 / 8 * BLK256); }
 	void mul512(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul512, reg_x, reg_xp, reg_w, 512 / 8 * BLK512); }
+	void mul1024(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul1024, reg_x, reg_xp, reg_w, 1024 / 8 * BLK1024); }
+	void mul2048(const size_t reg_x, const size_t reg_xp, const size_t reg_w) { execute_kernel_mul(_mul2048, reg_x, reg_xp, reg_w, 2048 / 8 * BLK2048); }
 
 	void fwd4x2(const size_t reg_x, const size_t reg_w) { execute_kernel(_fwd4x2, reg_x, reg_w); }
 	void fwd8(const size_t reg_x, const size_t reg_w) { execute_kernel(_fwd8, reg_x, reg_w); }
@@ -282,6 +292,8 @@ public:
 	void fwd128(const size_t reg_x, const size_t reg_w) { execute_kernel(_fwd128, reg_x, reg_w, 128 / 8 * BLK128); }
 	void fwd256(const size_t reg_x, const size_t reg_w) { execute_kernel(_fwd256, reg_x, reg_w, 256 / 8 * BLK256); }
 	void fwd512(const size_t reg_x, const size_t reg_w) { execute_kernel(_fwd512, reg_x, reg_w, 512 / 8 * BLK512); }
+	void fwd1024(const size_t reg_x, const size_t reg_w) { execute_kernel(_fwd1024, reg_x, reg_w, 1024 / 8 * BLK1024); }
+	void fwd2048(const size_t reg_x, const size_t reg_w) { execute_kernel(_fwd2048, reg_x, reg_w, 2048 / 8 * BLK2048); }
 
 	void carry_mul(const size_t reg_x, const int32 a)
 	{

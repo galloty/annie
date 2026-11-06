@@ -37,6 +37,8 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define BLK128			4
 #define BLK256			2
 #define BLK512			1
+#define BLK1024			1
+#define BLK2048			1
 #define CHUNK64			32
 #define CHUNK512		4
 #endif
@@ -684,11 +686,43 @@ void backward512_0(__global ZP * restrict const regm, const uint_32 reg_x, const
 	__local ZP * const Xb = &X[N * block_id]; \
 	const sz_t s = N_SZ / 8, sj = s + id, k = 8 * id;
 
+#define DECLARE_VAR_SQRMUL16() \
+	DECLARE_VAR_SQRMUL(16, BLK16); \
+	const sz_t k2 = 7 * (id & ~(2 - 1)) + id;
+
+#define DECLARE_VAR_SQRMUL32() \
+	DECLARE_VAR_SQRMUL(32, BLK32); \
+	const sz_t k4 = 7 * (id & ~(4 - 1)) + id;
+
+#define DECLARE_VAR_SQRMUL64() \
+	DECLARE_VAR_SQRMUL(64, BLK64); \
+	const sz_t k8 = 7 * (id & ~(8 - 1)) + id;
+
+#define DECLARE_VAR_SQRMUL128() \
+	DECLARE_VAR_SQRMUL(128, BLK128); \
+	const sz_t k2 = 7 * (id & ~(2 - 1)) + id, k16 = 7 * (id & ~(16 - 1)) + id;
+
+#define DECLARE_VAR_SQRMUL256() \
+	DECLARE_VAR_SQRMUL(256, BLK256); \
+	const sz_t k4 = 7 * (id & ~(4 - 1)) + id, k32 = 7 * (id & ~(32 - 1)) + id;
+
+#define DECLARE_VAR_SQRMUL512() \
+	DECLARE_VAR_SQRMUL(512, BLK512); \
+	const sz_t k8 = 7 * (id & ~(8 - 1)) + id, k64 = 7 * (id & ~(64 - 1)) + id;
+
+#define DECLARE_VAR_SQRMUL1024() \
+	DECLARE_VAR_SQRMUL(1024, BLK1024); \
+	const sz_t k2 = 7 * (id & ~(2 - 1)) + id, k16 = 7 * (id & ~(16 - 1)) + id, k128 = 7 * (id & ~(128 - 1)) + id;
+
+#define DECLARE_VAR_SQRMUL2048() \
+	DECLARE_VAR_SQRMUL(2048, BLK2048); \
+	const sz_t k4 = 7 * (id & ~(4 - 1)) + id, k32 = 7 * (id & ~(32 - 1)) + id, k256 = 7 * (id & ~(256 - 1)) + id;
+
+
 __kernel __attribute__((reqd_work_group_size(16 / 8 * BLK16, 1, 1)))
 void square16(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
-	DECLARE_VAR_SQRMUL(16, BLK16);
-	const sz_t k2 = 7 * (id & ~(2 - 1)) + id;
+	DECLARE_VAR_SQRMUL16();
 
 	forward8i(pq, 2, &Xb[k2 % 16], 2, &x[k2], w, sj / 2);
 	square2x4l(pq, &Xb[k % 16], w, sj);
@@ -698,8 +732,7 @@ void square16(__global ZP * restrict const regm, const uint_32 reg_x, const uint
 __kernel __attribute__((reqd_work_group_size(32 / 8 * BLK32, 1, 1)))
 void square32(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
-	DECLARE_VAR_SQRMUL(32, BLK32);
-	const sz_t k4 = 7 * (id & ~(4 - 1)) + id;
+	DECLARE_VAR_SQRMUL32();
 
 	forward8i(pq, 4, &Xb[k4 % 32], 4, &x[k4], w, sj / 4);
 	square4x2l(pq, &Xb[k % 32], w, sj);
@@ -709,8 +742,7 @@ void square32(__global ZP * restrict const regm, const uint_32 reg_x, const uint
 __kernel __attribute__((reqd_work_group_size(64 / 8 * BLK64, 1, 1)))
 void square64(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
-	DECLARE_VAR_SQRMUL(64, BLK64);
-	const sz_t k8 = 7 * (id & ~(8 - 1)) + id;
+	DECLARE_VAR_SQRMUL64();
 
 	forward8i(pq, 8, &Xb[k8 % 64], 8, &x[k8], w, sj / 8);
 	square8l(pq, &Xb[k % 64], w, sj);
@@ -720,8 +752,7 @@ void square64(__global ZP * restrict const regm, const uint_32 reg_x, const uint
 __kernel __attribute__((reqd_work_group_size(128 / 8 * BLK128, 1, 1)))
 void square128(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
-	DECLARE_VAR_SQRMUL(128, BLK128);
-	const sz_t k2 = 7 * (id & ~(2 - 1)) + id, k16 = 7 * (id & ~(16 - 1)) + id;
+	DECLARE_VAR_SQRMUL128();
 
 	forward8i(pq, 16, &Xb[k16 % 128], 16, &x[k16], w, sj / 16);
 	forward8l(pq, 2, &Xb[k2 % 128], w, sj / 2);
@@ -733,8 +764,7 @@ void square128(__global ZP * restrict const regm, const uint_32 reg_x, const uin
 __kernel __attribute__((reqd_work_group_size(256 / 8 * BLK256, 1, 1)))
 void square256(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
-	DECLARE_VAR_SQRMUL(256, BLK256);
-	const sz_t k4 = 7 * (id & ~(4 - 1)) + id, k32 = 7 * (id & ~(32 - 1)) + id;
+	DECLARE_VAR_SQRMUL256();
 
 	forward8i(pq, 32, &Xb[k32 % 256], 32, &x[k32], w, sj / 32);
 	forward8l(pq, 4, &Xb[k4 % 256], w, sj / 4);
@@ -746,8 +776,7 @@ void square256(__global ZP * restrict const regm, const uint_32 reg_x, const uin
 __kernel __attribute__((reqd_work_group_size(512 / 8 * BLK512, 1, 1)))
 void square512(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
-	DECLARE_VAR_SQRMUL(512, BLK512);
-	const sz_t k8 = 7 * (id & ~(8 - 1)) + id, k64 = 7 * (id & ~(64 - 1)) + id;
+	DECLARE_VAR_SQRMUL512();
 
 	forward8i(pq, 64, &Xb[k64 % 512], 64, &x[k64], w, sj / 64);
 	forward8l(pq, 8, &Xb[k8 % 512], w, sj / 8);
@@ -756,14 +785,41 @@ void square512(__global ZP * restrict const regm, const uint_32 reg_x, const uin
 	backward8o(pq, 64, &x[k64], 64, &Xb[k64 % 512], w, sj / 64);
 }
 
+__kernel __attribute__((reqd_work_group_size(1024 / 8 * BLK1024, 1, 1)))
+void square1024(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
+{
+	DECLARE_VAR_SQRMUL1024();
+
+	forward8i(pq, 128, &Xb[k128 % 1024], 128, &x[k128], w, sj / 128);
+	forward8l(pq, 16, &Xb[k16 % 1024], w, sj / 16);
+	forward8l(pq, 2, &Xb[k2 % 1024], w, sj / 2);
+	square2x4l(pq, &Xb[k % 1024], w, sj);
+	backward8l(pq, 2, &Xb[k2 % 1024], w, sj / 2);
+	backward8l(pq, 16, &Xb[k16 % 1024], w, sj / 16);
+	backward8o(pq, 128, &x[k128], 128, &Xb[k128 % 1024], w, sj / 128);
+}
+
+__kernel __attribute__((reqd_work_group_size(2048 / 8 * BLK2048, 1, 1)))
+void square2048(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
+{
+	DECLARE_VAR_SQRMUL2048();
+
+	forward8i(pq, 256, &Xb[k256 % 2048], 256, &x[k256], w, sj / 256);
+	forward8l(pq, 32, &Xb[k32 % 2048], w, sj / 32);
+	forward8l(pq, 4, &Xb[k4 % 2048], w, sj / 4);
+	square4x2l(pq, &Xb[k % 2048], w, sj);
+	backward8l(pq, 4, &Xb[k4 % 2048], w, sj / 4);
+	backward8l(pq, 32, &Xb[k32 % 2048], w, sj / 32);
+	backward8o(pq, 256, &x[k256], 256, &Xb[k256 % 2048], w, sj / 256);
+}
+
 // ---
 
 __kernel __attribute__((reqd_work_group_size(16 / 8 * BLK16, 1, 1)))
 void mul16(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)
 {
-	DECLARE_VAR_SQRMUL(16, BLK16);
+	DECLARE_VAR_SQRMUL16();
 	DECLARE_VARP_REG();
-	const sz_t k2 = 7 * (id & ~(2 - 1)) + id;
 
 	forward8i(pq, 2, &Xb[k2 % 16], 2, &x[k2], w, sj / 2);
 	mul2x4l(pq, &Xb[k % 16], &xp[k], w, sj);
@@ -773,9 +829,8 @@ void mul16(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32
 __kernel __attribute__((reqd_work_group_size(32 / 8 * BLK32, 1, 1)))
 void mul32(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)
 {
-	DECLARE_VAR_SQRMUL(32, BLK32);
+	DECLARE_VAR_SQRMUL32();
 	DECLARE_VARP_REG();
-	const sz_t k4 = 7 * (id & ~(4 - 1)) + id;
 
 	forward8i(pq, 4, &Xb[k4 % 32], 4, &x[k4], w, sj / 4);
 	mul4x2l(pq, &Xb[k % 32], &xp[k], w, sj);
@@ -785,9 +840,8 @@ void mul32(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32
 __kernel __attribute__((reqd_work_group_size(64 / 8 * BLK64, 1, 1)))
 void mul64(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)
 {
-	DECLARE_VAR_SQRMUL(64, BLK64);
+	DECLARE_VAR_SQRMUL64();
 	DECLARE_VARP_REG();
-	const sz_t k8 = 7 * (id & ~(8 - 1)) + id;
 
 	forward8i(pq, 8, &Xb[k8 % 64], 8, &x[k8], w, sj / 8);
 	mul8l(pq, &Xb[k % 64], &xp[k], w, sj);
@@ -797,9 +851,8 @@ void mul64(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32
 __kernel __attribute__((reqd_work_group_size(128 / 8 * BLK128, 1, 1)))
 void mul128(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)
 {
-	DECLARE_VAR_SQRMUL(128, BLK128);
+	DECLARE_VAR_SQRMUL128();
 	DECLARE_VARP_REG();
-	const sz_t k2 = 7 * (id & ~(2 - 1)) + id, k16 = 7 * (id & ~(16 - 1)) + id;
 
 	forward8i(pq, 16, &Xb[k16 % 128], 16, &x[k16], w, sj / 16);
 	forward8l(pq, 2, &Xb[k2 % 128], w, sj / 2);
@@ -811,9 +864,8 @@ void mul128(__global ZP * restrict const regm, const uint_32 reg_x, const uint_3
 __kernel __attribute__((reqd_work_group_size(256 / 8 * BLK256, 1, 1)))
 void mul256(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)
 {
-	DECLARE_VAR_SQRMUL(256, BLK256);
+	DECLARE_VAR_SQRMUL256();
 	DECLARE_VARP_REG();
-	const sz_t k4 = 7 * (id & ~(4 - 1)) + id, k32 = 7 * (id & ~(32 - 1)) + id;
 
 	forward8i(pq, 32, &Xb[k32 % 256], 32, &x[k32], w, sj / 32);
 	forward8l(pq, 4, &Xb[k4 % 256], w, sj / 4);
@@ -825,9 +877,8 @@ void mul256(__global ZP * restrict const regm, const uint_32 reg_x, const uint_3
 __kernel __attribute__((reqd_work_group_size(512 / 8 * BLK512, 1, 1)))
 void mul512(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)
 {
-	DECLARE_VAR_SQRMUL(512, BLK512);
+	DECLARE_VAR_SQRMUL512();
 	DECLARE_VARP_REG();
-	const sz_t k8 = 7 * (id & ~(8 - 1)) + id, k64 = 7 * (id & ~(64 - 1)) + id;
 
 	forward8i(pq, 64, &Xb[k64 % 512], 64, &x[k64], w, sj / 64);
 	forward8l(pq, 8, &Xb[k8 % 512], w, sj / 8);
@@ -836,13 +887,42 @@ void mul512(__global ZP * restrict const regm, const uint_32 reg_x, const uint_3
 	backward8o(pq, 64, &x[k64], 64, &Xb[k64 % 512], w, sj / 64);
 }
 
+__kernel __attribute__((reqd_work_group_size(1024 / 8 * BLK1024, 1, 1)))
+void mul1024(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)
+{
+	DECLARE_VAR_SQRMUL1024();
+	DECLARE_VARP_REG();
+
+	forward8i(pq, 128, &Xb[k128 % 1024], 128, &x[k128], w, sj / 128);
+	forward8l(pq, 16, &Xb[k16 % 1024], w, sj / 16);
+	forward8l(pq, 2, &Xb[k2 % 1024], w, sj / 2);
+	mul2x4l(pq, &Xb[k % 1024], &xp[k], w, sj);
+	backward8l(pq, 2, &Xb[k2 % 1024], w, sj / 2);
+	backward8l(pq, 16, &Xb[k16 % 1024], w, sj / 16);
+	backward8o(pq, 128, &x[k128], 128, &Xb[k128 % 1024], w, sj / 128);
+}
+
+__kernel __attribute__((reqd_work_group_size(2048 / 8 * BLK2048, 1, 1)))
+void mul2048(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)
+{
+	DECLARE_VAR_SQRMUL2048();
+	DECLARE_VARP_REG();
+
+	forward8i(pq, 256, &Xb[k256 % 2048], 256, &x[k256], w, sj / 256);
+	forward8l(pq, 32, &Xb[k32 % 2048], w, sj / 32);
+	forward8l(pq, 4, &Xb[k4 % 2048], w, sj / 4);
+	mul4x2l(pq, &Xb[k % 2048], &xp[k], w, sj);
+	backward8l(pq, 4, &Xb[k4 % 2048], w, sj / 4);
+	backward8l(pq, 32, &Xb[k32 % 2048], w, sj / 32);
+	backward8o(pq, 256, &x[k256], 256, &Xb[k256 % 2048], w, sj / 256);
+}
+
 // ---
 
 __kernel __attribute__((reqd_work_group_size(32 / 8 * BLK32, 1, 1)))
 void fwd32(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
-	DECLARE_VAR_SQRMUL(32, BLK32);
-	const sz_t k4 = 7 * (id & ~(4 - 1)) + id;
+	DECLARE_VAR_SQRMUL32();
 
 	forward8i(pq, 4, &Xb[k4 % 32], 4, &x[k4], w, sj / 4);
 	fwd4x2o(pq, &x[k], &Xb[k % 32], w, sj);
@@ -851,8 +931,7 @@ void fwd32(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32
 __kernel __attribute__((reqd_work_group_size(64 / 8 * BLK64, 1, 1)))
 void fwd64(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
-	DECLARE_VAR_SQRMUL(64, BLK64);
-	const sz_t k8 = 7 * (id & ~(8 - 1)) + id;
+	DECLARE_VAR_SQRMUL64();
 
 	forward8i(pq, 8, &Xb[k8 % 64], 8, &x[k8], w, sj / 8);
 	fwd8o(pq, &x[k], &Xb[k % 64], w, sj);
@@ -861,8 +940,7 @@ void fwd64(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32
 __kernel __attribute__((reqd_work_group_size(128 / 8 * BLK128, 1, 1)))
 void fwd128(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
-	DECLARE_VAR_SQRMUL(128, BLK128);
-	const sz_t k2 = 7 * (id & ~(2 - 1)) + id, k16 = 7 * (id & ~(16 - 1)) + id;
+	DECLARE_VAR_SQRMUL128();
 
 	forward8i(pq, 16, &Xb[k16 % 128], 16, &x[k16], w, sj / 16);
 	forward8o(pq, 2, &x[k2], 2, &Xb[k2 % 128], w, sj / 2);
@@ -871,8 +949,7 @@ void fwd128(__global ZP * restrict const regm, const uint_32 reg_x, const uint_3
 __kernel __attribute__((reqd_work_group_size(256 / 8 * BLK256, 1, 1)))
 void fwd256(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
-	DECLARE_VAR_SQRMUL(256, BLK256);
-	const sz_t k4 = 7 * (id & ~(4 - 1)) + id, k32 = 7 * (id & ~(32 - 1)) + id;
+	DECLARE_VAR_SQRMUL256();
 
 	forward8i(pq, 32, &Xb[k32 % 256], 32, &x[k32], w, sj / 32);
 	forward8l(pq, 4, &Xb[k4 % 256], w, sj / 4);
@@ -882,12 +959,32 @@ void fwd256(__global ZP * restrict const regm, const uint_32 reg_x, const uint_3
 __kernel __attribute__((reqd_work_group_size(512 / 8 * BLK512, 1, 1)))
 void fwd512(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
 {
-	DECLARE_VAR_SQRMUL(512, BLK512);
-	const sz_t k8 = 7 * (id & ~(8 - 1)) + id, k64 = 7 * (id & ~(64 - 1)) + id;
+	DECLARE_VAR_SQRMUL512();
 
 	forward8i(pq, 64, &Xb[k64 % 512], 64, &x[k64], w, sj / 64);
 	forward8l(pq, 8, &Xb[k8 % 512], w, sj / 8);
 	fwd8o(pq, &x[k], &Xb[k % 512], w, sj);
+}
+
+__kernel __attribute__((reqd_work_group_size(1024 / 8 * BLK1024, 1, 1)))
+void fwd1024(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
+{
+	DECLARE_VAR_SQRMUL1024();
+
+	forward8i(pq, 128, &Xb[k128 % 1024], 128, &x[k128], w, sj / 128);
+	forward8l(pq, 16, &Xb[k16 % 1024], w, sj / 16);
+	forward8o(pq, 2, &x[k2], 2, &Xb[k2 % 1024], w, sj / 2);
+}
+
+__kernel __attribute__((reqd_work_group_size(2048 / 8 * BLK2048, 1, 1)))
+void fwd2048(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)
+{
+	DECLARE_VAR_SQRMUL2048();
+
+	forward8i(pq, 256, &Xb[k256 % 2048], 256, &x[k256], w, sj / 256);
+	forward8l(pq, 32, &Xb[k32 % 2048], w, sj / 32);
+	forward8l(pq, 4, &Xb[k4 % 2048], w, sj / 4);
+	fwd4x2o(pq, &x[k], &Xb[k % 2048], w, sj);
 }
 
 // --- carry ---
