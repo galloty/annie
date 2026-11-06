@@ -28,6 +28,7 @@ static const char * const src_ocl_kernel = \
 "#endif\n" \
 "\n" \
 "#if !defined(N_SZ)\n" \
+"#define LN_SZ			16\n" \
 "#define N_SZ			65536u\n" \
 "#define LBASE			22\n" \
 "#define P1				4194304001u\n" \
@@ -43,12 +44,14 @@ static const char * const src_ocl_kernel = \
 "#define CARRY_LENGTH	4u\n" \
 "#define CARRY_WG_SZ     256u\n" \
 "#define Z_OFFSET		655360u\n" \
-"#define BLK16			32\n" \
-"#define BLK32			16\n" \
+"#define BLK16			8\n" \
+"#define BLK32			8\n" \
 "#define BLK64			8\n" \
 "#define BLK128			4\n" \
 "#define BLK256			2\n" \
 "#define BLK512			1\n" \
+"#define BLK1024			1\n" \
+"#define BLK2048			1\n" \
 "#define CHUNK64			32\n" \
 "#define CHUNK512		4\n" \
 "#endif\n" \
@@ -512,6 +515,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// --- transform without local mem ---\n" \
 "\n" \
+"#if (LN_SZ >= 21)\n" \
 "__kernel\n" \
 "void forward8(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const int_32 lm, const uint_32 s)\n" \
 "{\n" \
@@ -527,7 +531,9 @@ static const char * const src_ocl_kernel = \
 "	const sz_t m = 1u << lm, sj = s + (id >> lm), k = 7 * (id & ~(m - 1)) + id;\n" \
 "	backward8g(pq, m, &x[k], w, sj);\n" \
 "}\n" \
+"#endif\n" \
 "\n" \
+"#if (LN_SZ <= 12)\n" \
 "__kernel\n" \
 "void forward8_0(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
 "{\n" \
@@ -543,9 +549,11 @@ static const char * const src_ocl_kernel = \
 "	const sz_t m = N_SZ / 8, sj = 1, k = id;\n" \
 "	backward8g(pq, m, &x[k], w, sj);\n" \
 "}\n" \
+"#endif\n" \
 "\n" \
 "// ---\n" \
 "\n" \
+"#if (LN_SZ == 4)\n" \
 "__kernel\n" \
 "void square2x4(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
 "{\n" \
@@ -553,7 +561,9 @@ static const char * const src_ocl_kernel = \
 "	const sz_t sj = N_SZ / 8 + id, k = 8 * id;\n" \
 "	square2x4g(pq, &x[k], w, sj);\n" \
 "}\n" \
+"#endif\n" \
 "\n" \
+"#if (LN_SZ == 5)\n" \
 "__kernel\n" \
 "void square4x2(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
 "{\n" \
@@ -561,7 +571,9 @@ static const char * const src_ocl_kernel = \
 "	const sz_t sj = N_SZ / 8 + id, k = 8 * id;\n" \
 "	square4x2g(pq, &x[k], w, sj);\n" \
 "}\n" \
+"#endif\n" \
 "\n" \
+"#if (LN_SZ == 6)\n" \
 "__kernel\n" \
 "void square8(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
 "{\n" \
@@ -569,9 +581,11 @@ static const char * const src_ocl_kernel = \
 "	const sz_t sj = N_SZ / 8 + id, k = 8 * id;\n" \
 "	square8g(pq, &x[k], w, sj);\n" \
 "}\n" \
+"#endif\n" \
 "\n" \
 "// ---\n" \
 "\n" \
+"#if (LN_SZ == 4)\n" \
 "__kernel\n" \
 "void mul2x4(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
 "{\n" \
@@ -580,7 +594,9 @@ static const char * const src_ocl_kernel = \
 "	const sz_t sj = N_SZ / 8 + id, k = 8 * id;\n" \
 "	mul2x4g(pq, &x[k], &xp[k], w, sj);\n" \
 "}\n" \
+"#endif\n" \
 "\n" \
+"#if (LN_SZ == 5)\n" \
 "__kernel\n" \
 "void mul4x2(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
 "{\n" \
@@ -589,7 +605,9 @@ static const char * const src_ocl_kernel = \
 "	const sz_t sj = N_SZ / 8 + id, k = 8 * id;\n" \
 "	mul4x2g(pq, &x[k], &xp[k], w, sj);\n" \
 "}\n" \
+"#endif\n" \
 "\n" \
+"#if (LN_SZ == 6)\n" \
 "__kernel\n" \
 "void mul8(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
 "{\n" \
@@ -598,9 +616,11 @@ static const char * const src_ocl_kernel = \
 "	const sz_t sj = N_SZ / 8 + id, k = 8 * id;\n" \
 "	mul8g(pq, &x[k], &xp[k], w, sj);\n" \
 "}\n" \
+"#endif\n" \
 "\n" \
 "// ---\n" \
 "\n" \
+"#if (LN_SZ == 5)\n" \
 "__kernel\n" \
 "void fwd4x2(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
 "{\n" \
@@ -608,7 +628,9 @@ static const char * const src_ocl_kernel = \
 "	const sz_t sj = N_SZ / 8 + id, k = 8 * id;\n" \
 "	fwd4x2g(pq, &x[k], w, sj);\n" \
 "}\n" \
+"#endif\n" \
 "\n" \
+"#if (LN_SZ == 6)\n" \
 "__kernel\n" \
 "void fwd8(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
 "{\n" \
@@ -616,7 +638,9 @@ static const char * const src_ocl_kernel = \
 "	const sz_t sj = N_SZ / 8 + id, k = 8 * id;\n" \
 "	fwd8g(pq, &x[k], w, sj);\n" \
 "}\n" \
+"#endif\n" \
 "\n" \
+"#if (LN_SZ == 7)\n" \
 "__kernel\n" \
 "void fwd16(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
 "{\n" \
@@ -624,6 +648,7 @@ static const char * const src_ocl_kernel = \
 "	const sz_t sj = N_SZ / 8 + id, k2 = 7 * (id & ~(2 - 1)) + id;\n" \
 "	forward8g(pq, 2, &x[k2], w, sj / 2);\n" \
 "}\n" \
+"#endif\n" \
 "\n" \
 "// --- transform using local mem ---\n" \
 "\n" \
@@ -633,6 +658,8 @@ static const char * const src_ocl_kernel = \
 "	const size_t chunk_id = id % CHUNK_N, local_id = (id / CHUNK_N) % (N / 8), block_id = id & ~(N / 8 * CHUNK_N - 1); \\\n" \
 "	__global ZP * restrict const xt = &x[block_id / (N / 8) + chunk_id]; \\\n" \
 "	__local ZP * const Xt = &X[N * chunk_id];\n" \
+"\n" \
+"#if (LN_SZ > 12) && (LN_SZ <= 16)\n" \
 "\n" \
 "#define DECLARE_VAR_FB64() \\\n" \
 "	const sz_t kl0 = local_id, k0 = kl0 * (N_SZ / 64), ml0 = 8, m0 = ml0 * (N_SZ / 64); \\\n" \
@@ -658,6 +685,9 @@ static const char * const src_ocl_kernel = \
 "	backward8i(pq, ml8, &Xt[kl8], m8, &xt[k8], w, sj8);\n" \
 "	backward8o(pq, m0, &xt[k0], ml0, &Xt[kl0], w, 1);\n" \
 "}\n" \
+"#endif\n" \
+"\n" \
+"#if (LN_SZ > 16)\n" \
 "\n" \
 "#define DECLARE_VAR_FB512() \\\n" \
 "	const sz_t kl0 = local_id, k0 = kl0 * (N_SZ / 512), ml0 = 64, m0 = ml0 * (N_SZ / 512); \\\n" \
@@ -686,6 +716,7 @@ static const char * const src_ocl_kernel = \
 "	backward8l(pq, ml8, &Xt[kl8], w, sj8);\n" \
 "	backward8o(pq, m0, &xt[k0], ml0, &Xt[kl0], w, 1);\n" \
 "}\n" \
+"#endif\n" \
 "\n" \
 "// ---\n" \
 "\n" \
@@ -696,44 +727,118 @@ static const char * const src_ocl_kernel = \
 "	__local ZP * const Xb = &X[N * block_id]; \\\n" \
 "	const sz_t s = N_SZ / 8, sj = s + id, k = 8 * id;\n" \
 "\n" \
+"#if (LN_SZ == 7)\n" \
+"\n" \
+"#define DECLARE_VAR_SQRMUL16() \\\n" \
+"	DECLARE_VAR_SQRMUL(16, BLK16); \\\n" \
+"	const sz_t k2 = 7 * (id & ~(2 - 1)) + id;\n" \
+"\n" \
 "__kernel __attribute__((reqd_work_group_size(16 / 8 * BLK16, 1, 1)))\n" \
 "void square16(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
 "{\n" \
-"	DECLARE_VAR_SQRMUL(16, BLK16);\n" \
-"	const sz_t k2 = 7 * (id & ~(2 - 1)) + id;\n" \
+"	DECLARE_VAR_SQRMUL16();\n" \
 "\n" \
 "	forward8i(pq, 2, &Xb[k2 % 16], 2, &x[k2], w, sj / 2);\n" \
 "	square2x4l(pq, &Xb[k % 16], w, sj);\n" \
 "	backward8o(pq, 2, &x[k2], 2, &Xb[k2 % 16], w, sj / 2);\n" \
 "}\n" \
 "\n" \
+"__kernel __attribute__((reqd_work_group_size(16 / 8 * BLK16, 1, 1)))\n" \
+"void mul16(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
+"{\n" \
+"	DECLARE_VAR_SQRMUL16();\n" \
+"	DECLARE_VARP_REG();\n" \
+"\n" \
+"	forward8i(pq, 2, &Xb[k2 % 16], 2, &x[k2], w, sj / 2);\n" \
+"	mul2x4l(pq, &Xb[k % 16], &xp[k], w, sj);\n" \
+"	backward8o(pq, 2, &x[k2], 2, &Xb[k2 % 16], w, sj / 2);\n" \
+"}\n" \
+"#endif\n" \
+"\n" \
+"#if (LN_SZ == 8)\n" \
+"\n" \
+"#define DECLARE_VAR_SQRMUL32() \\\n" \
+"	DECLARE_VAR_SQRMUL(32, BLK32); \\\n" \
+"	const sz_t k4 = 7 * (id & ~(4 - 1)) + id;\n" \
+"\n" \
 "__kernel __attribute__((reqd_work_group_size(32 / 8 * BLK32, 1, 1)))\n" \
 "void square32(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
 "{\n" \
-"	DECLARE_VAR_SQRMUL(32, BLK32);\n" \
-"	const sz_t k4 = 7 * (id & ~(4 - 1)) + id;\n" \
+"	DECLARE_VAR_SQRMUL32();\n" \
 "\n" \
 "	forward8i(pq, 4, &Xb[k4 % 32], 4, &x[k4], w, sj / 4);\n" \
 "	square4x2l(pq, &Xb[k % 32], w, sj);\n" \
 "	backward8o(pq, 4, &x[k4], 4, &Xb[k4 % 32], w, sj / 4);\n" \
 "}\n" \
 "\n" \
+"__kernel __attribute__((reqd_work_group_size(32 / 8 * BLK32, 1, 1)))\n" \
+"void mul32(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
+"{\n" \
+"	DECLARE_VAR_SQRMUL32();\n" \
+"	DECLARE_VARP_REG();\n" \
+"\n" \
+"	forward8i(pq, 4, &Xb[k4 % 32], 4, &x[k4], w, sj / 4);\n" \
+"	mul4x2l(pq, &Xb[k % 32], &xp[k], w, sj);\n" \
+"	backward8o(pq, 4, &x[k4], 4, &Xb[k4 % 32], w, sj / 4);\n" \
+"}\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(32 / 8 * BLK32, 1, 1)))\n" \
+"void fwd32(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
+"{\n" \
+"	DECLARE_VAR_SQRMUL32();\n" \
+"\n" \
+"	forward8i(pq, 4, &Xb[k4 % 32], 4, &x[k4], w, sj / 4);\n" \
+"	fwd4x2o(pq, &x[k], &Xb[k % 32], w, sj);\n" \
+"}\n" \
+"#endif\n" \
+"\n" \
+"#if (LN_SZ == 9)\n" \
+"\n" \
+"#define DECLARE_VAR_SQRMUL64() \\\n" \
+"	DECLARE_VAR_SQRMUL(64, BLK64); \\\n" \
+"	const sz_t k8 = 7 * (id & ~(8 - 1)) + id;\n" \
+"\n" \
 "__kernel __attribute__((reqd_work_group_size(64 / 8 * BLK64, 1, 1)))\n" \
 "void square64(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
 "{\n" \
-"	DECLARE_VAR_SQRMUL(64, BLK64);\n" \
-"	const sz_t k8 = 7 * (id & ~(8 - 1)) + id;\n" \
+"	DECLARE_VAR_SQRMUL64();\n" \
 "\n" \
 "	forward8i(pq, 8, &Xb[k8 % 64], 8, &x[k8], w, sj / 8);\n" \
 "	square8l(pq, &Xb[k % 64], w, sj);\n" \
 "	backward8o(pq, 8, &x[k8], 8, &Xb[k8 % 64], w, sj / 8);\n" \
 "}\n" \
 "\n" \
+"__kernel __attribute__((reqd_work_group_size(64 / 8 * BLK64, 1, 1)))\n" \
+"void mul64(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
+"{\n" \
+"	DECLARE_VAR_SQRMUL64();\n" \
+"	DECLARE_VARP_REG();\n" \
+"\n" \
+"	forward8i(pq, 8, &Xb[k8 % 64], 8, &x[k8], w, sj / 8);\n" \
+"	mul8l(pq, &Xb[k % 64], &xp[k], w, sj);\n" \
+"	backward8o(pq, 8, &x[k8], 8, &Xb[k8 % 64], w, sj / 8);\n" \
+"}\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(64 / 8 * BLK64, 1, 1)))\n" \
+"void fwd64(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
+"{\n" \
+"	DECLARE_VAR_SQRMUL64();\n" \
+"\n" \
+"	forward8i(pq, 8, &Xb[k8 % 64], 8, &x[k8], w, sj / 8);\n" \
+"	fwd8o(pq, &x[k], &Xb[k % 64], w, sj);\n" \
+"}\n" \
+"#endif\n" \
+"\n" \
+"#if (LN_SZ == 10) || (LN_SZ == 13)\n" \
+"\n" \
+"#define DECLARE_VAR_SQRMUL128() \\\n" \
+"	DECLARE_VAR_SQRMUL(128, BLK128); \\\n" \
+"	const sz_t k2 = 7 * (id & ~(2 - 1)) + id, k16 = 7 * (id & ~(16 - 1)) + id;\n" \
+"\n" \
 "__kernel __attribute__((reqd_work_group_size(128 / 8 * BLK128, 1, 1)))\n" \
 "void square128(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
 "{\n" \
-"	DECLARE_VAR_SQRMUL(128, BLK128);\n" \
-"	const sz_t k2 = 7 * (id & ~(2 - 1)) + id, k16 = 7 * (id & ~(16 - 1)) + id;\n" \
+"	DECLARE_VAR_SQRMUL128();\n" \
 "\n" \
 "	forward8i(pq, 16, &Xb[k16 % 128], 16, &x[k16], w, sj / 16);\n" \
 "	forward8l(pq, 2, &Xb[k2 % 128], w, sj / 2);\n" \
@@ -742,76 +847,11 @@ static const char * const src_ocl_kernel = \
 "	backward8o(pq, 16, &x[k16], 16, &Xb[k16 % 128], w, sj / 16);\n" \
 "}\n" \
 "\n" \
-"__kernel __attribute__((reqd_work_group_size(256 / 8 * BLK256, 1, 1)))\n" \
-"void square256(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
-"{\n" \
-"	DECLARE_VAR_SQRMUL(256, BLK256);\n" \
-"	const sz_t k4 = 7 * (id & ~(4 - 1)) + id, k32 = 7 * (id & ~(32 - 1)) + id;\n" \
-"\n" \
-"	forward8i(pq, 32, &Xb[k32 % 256], 32, &x[k32], w, sj / 32);\n" \
-"	forward8l(pq, 4, &Xb[k4 % 256], w, sj / 4);\n" \
-"	square4x2l(pq, &Xb[k % 256], w, sj);\n" \
-"	backward8l(pq, 4, &Xb[k4 % 256], w, sj / 4);\n" \
-"	backward8o(pq, 32, &x[k32], 32, &Xb[k32 % 256], w, sj / 32);\n" \
-"}\n" \
-"\n" \
-"__kernel __attribute__((reqd_work_group_size(512 / 8 * BLK512, 1, 1)))\n" \
-"void square512(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
-"{\n" \
-"	DECLARE_VAR_SQRMUL(512, BLK512);\n" \
-"	const sz_t k8 = 7 * (id & ~(8 - 1)) + id, k64 = 7 * (id & ~(64 - 1)) + id;\n" \
-"\n" \
-"	forward8i(pq, 64, &Xb[k64 % 512], 64, &x[k64], w, sj / 64);\n" \
-"	forward8l(pq, 8, &Xb[k8 % 512], w, sj / 8);\n" \
-"	square8l(pq, &Xb[k % 512], w, sj);\n" \
-"	backward8l(pq, 8, &Xb[k8 % 512], w, sj / 8);\n" \
-"	backward8o(pq, 64, &x[k64], 64, &Xb[k64 % 512], w, sj / 64);\n" \
-"}\n" \
-"\n" \
-"// ---\n" \
-"\n" \
-"__kernel __attribute__((reqd_work_group_size(16 / 8 * BLK16, 1, 1)))\n" \
-"void mul16(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
-"{\n" \
-"	DECLARE_VAR_SQRMUL(16, BLK16);\n" \
-"	DECLARE_VARP_REG();\n" \
-"	const sz_t k2 = 7 * (id & ~(2 - 1)) + id;\n" \
-"\n" \
-"	forward8i(pq, 2, &Xb[k2 % 16], 2, &x[k2], w, sj / 2);\n" \
-"	mul2x4l(pq, &Xb[k % 16], &xp[k], w, sj);\n" \
-"	backward8o(pq, 2, &x[k2], 2, &Xb[k2 % 16], w, sj / 2);\n" \
-"}\n" \
-"\n" \
-"__kernel __attribute__((reqd_work_group_size(32 / 8 * BLK32, 1, 1)))\n" \
-"void mul32(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
-"{\n" \
-"	DECLARE_VAR_SQRMUL(32, BLK32);\n" \
-"	DECLARE_VARP_REG();\n" \
-"	const sz_t k4 = 7 * (id & ~(4 - 1)) + id;\n" \
-"\n" \
-"	forward8i(pq, 4, &Xb[k4 % 32], 4, &x[k4], w, sj / 4);\n" \
-"	mul4x2l(pq, &Xb[k % 32], &xp[k], w, sj);\n" \
-"	backward8o(pq, 4, &x[k4], 4, &Xb[k4 % 32], w, sj / 4);\n" \
-"}\n" \
-"\n" \
-"__kernel __attribute__((reqd_work_group_size(64 / 8 * BLK64, 1, 1)))\n" \
-"void mul64(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
-"{\n" \
-"	DECLARE_VAR_SQRMUL(64, BLK64);\n" \
-"	DECLARE_VARP_REG();\n" \
-"	const sz_t k8 = 7 * (id & ~(8 - 1)) + id;\n" \
-"\n" \
-"	forward8i(pq, 8, &Xb[k8 % 64], 8, &x[k8], w, sj / 8);\n" \
-"	mul8l(pq, &Xb[k % 64], &xp[k], w, sj);\n" \
-"	backward8o(pq, 8, &x[k8], 8, &Xb[k8 % 64], w, sj / 8);\n" \
-"}\n" \
-"\n" \
 "__kernel __attribute__((reqd_work_group_size(128 / 8 * BLK128, 1, 1)))\n" \
 "void mul128(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
 "{\n" \
-"	DECLARE_VAR_SQRMUL(128, BLK128);\n" \
+"	DECLARE_VAR_SQRMUL128();\n" \
 "	DECLARE_VARP_REG();\n" \
-"	const sz_t k2 = 7 * (id & ~(2 - 1)) + id, k16 = 7 * (id & ~(16 - 1)) + id;\n" \
 "\n" \
 "	forward8i(pq, 16, &Xb[k16 % 128], 16, &x[k16], w, sj / 16);\n" \
 "	forward8l(pq, 2, &Xb[k2 % 128], w, sj / 2);\n" \
@@ -820,12 +860,39 @@ static const char * const src_ocl_kernel = \
 "	backward8o(pq, 16, &x[k16], 16, &Xb[k16 % 128], w, sj / 16);\n" \
 "}\n" \
 "\n" \
+"__kernel __attribute__((reqd_work_group_size(128 / 8 * BLK128, 1, 1)))\n" \
+"void fwd128(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
+"{\n" \
+"	DECLARE_VAR_SQRMUL128();\n" \
+"\n" \
+"	forward8i(pq, 16, &Xb[k16 % 128], 16, &x[k16], w, sj / 16);\n" \
+"	forward8o(pq, 2, &x[k2], 2, &Xb[k2 % 128], w, sj / 2);\n" \
+"}\n" \
+"#endif\n" \
+"\n" \
+"#if (LN_SZ == 11) || (LN_SZ == 14) || (LN_SZ == 17)\n" \
+"\n" \
+"#define DECLARE_VAR_SQRMUL256() \\\n" \
+"	DECLARE_VAR_SQRMUL(256, BLK256); \\\n" \
+"	const sz_t k4 = 7 * (id & ~(4 - 1)) + id, k32 = 7 * (id & ~(32 - 1)) + id;\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(256 / 8 * BLK256, 1, 1)))\n" \
+"void square256(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
+"{\n" \
+"	DECLARE_VAR_SQRMUL256();\n" \
+"\n" \
+"	forward8i(pq, 32, &Xb[k32 % 256], 32, &x[k32], w, sj / 32);\n" \
+"	forward8l(pq, 4, &Xb[k4 % 256], w, sj / 4);\n" \
+"	square4x2l(pq, &Xb[k % 256], w, sj);\n" \
+"	backward8l(pq, 4, &Xb[k4 % 256], w, sj / 4);\n" \
+"	backward8o(pq, 32, &x[k32], 32, &Xb[k32 % 256], w, sj / 32);\n" \
+"}\n" \
+"\n" \
 "__kernel __attribute__((reqd_work_group_size(256 / 8 * BLK256, 1, 1)))\n" \
 "void mul256(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
 "{\n" \
-"	DECLARE_VAR_SQRMUL(256, BLK256);\n" \
+"	DECLARE_VAR_SQRMUL256();\n" \
 "	DECLARE_VARP_REG();\n" \
-"	const sz_t k4 = 7 * (id & ~(4 - 1)) + id, k32 = 7 * (id & ~(32 - 1)) + id;\n" \
 "\n" \
 "	forward8i(pq, 32, &Xb[k32 % 256], 32, &x[k32], w, sj / 32);\n" \
 "	forward8l(pq, 4, &Xb[k4 % 256], w, sj / 4);\n" \
@@ -834,12 +901,40 @@ static const char * const src_ocl_kernel = \
 "	backward8o(pq, 32, &x[k32], 32, &Xb[k32 % 256], w, sj / 32);\n" \
 "}\n" \
 "\n" \
+"__kernel __attribute__((reqd_work_group_size(256 / 8 * BLK256, 1, 1)))\n" \
+"void fwd256(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
+"{\n" \
+"	DECLARE_VAR_SQRMUL256();\n" \
+"\n" \
+"	forward8i(pq, 32, &Xb[k32 % 256], 32, &x[k32], w, sj / 32);\n" \
+"	forward8l(pq, 4, &Xb[k4 % 256], w, sj / 4);\n" \
+"	fwd4x2o(pq, &x[k], &Xb[k % 256], w, sj);\n" \
+"}\n" \
+"#endif\n" \
+"\n" \
+"#if (LN_SZ == 12) || (LN_SZ == 15) || (LN_SZ == 18) || (LN_SZ == 21)\n" \
+"\n" \
+"#define DECLARE_VAR_SQRMUL512() \\\n" \
+"	DECLARE_VAR_SQRMUL(512, BLK512); \\\n" \
+"	const sz_t k8 = 7 * (id & ~(8 - 1)) + id, k64 = 7 * (id & ~(64 - 1)) + id;\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(512 / 8 * BLK512, 1, 1)))\n" \
+"void square512(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
+"{\n" \
+"	DECLARE_VAR_SQRMUL512();\n" \
+"\n" \
+"	forward8i(pq, 64, &Xb[k64 % 512], 64, &x[k64], w, sj / 64);\n" \
+"	forward8l(pq, 8, &Xb[k8 % 512], w, sj / 8);\n" \
+"	square8l(pq, &Xb[k % 512], w, sj);\n" \
+"	backward8l(pq, 8, &Xb[k8 % 512], w, sj / 8);\n" \
+"	backward8o(pq, 64, &x[k64], 64, &Xb[k64 % 512], w, sj / 64);\n" \
+"}\n" \
+"\n" \
 "__kernel __attribute__((reqd_work_group_size(512 / 8 * BLK512, 1, 1)))\n" \
 "void mul512(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
 "{\n" \
-"	DECLARE_VAR_SQRMUL(512, BLK512);\n" \
+"	DECLARE_VAR_SQRMUL512();\n" \
 "	DECLARE_VARP_REG();\n" \
-"	const sz_t k8 = 7 * (id & ~(8 - 1)) + id, k64 = 7 * (id & ~(64 - 1)) + id;\n" \
 "\n" \
 "	forward8i(pq, 64, &Xb[k64 % 512], 64, &x[k64], w, sj / 64);\n" \
 "	forward8l(pq, 8, &Xb[k8 % 512], w, sj / 8);\n" \
@@ -848,59 +943,109 @@ static const char * const src_ocl_kernel = \
 "	backward8o(pq, 64, &x[k64], 64, &Xb[k64 % 512], w, sj / 64);\n" \
 "}\n" \
 "\n" \
-"// ---\n" \
-"\n" \
-"__kernel __attribute__((reqd_work_group_size(32 / 8 * BLK32, 1, 1)))\n" \
-"void fwd32(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
-"{\n" \
-"	DECLARE_VAR_SQRMUL(32, BLK32);\n" \
-"	const sz_t k4 = 7 * (id & ~(4 - 1)) + id;\n" \
-"\n" \
-"	forward8i(pq, 4, &Xb[k4 % 32], 4, &x[k4], w, sj / 4);\n" \
-"	fwd4x2o(pq, &x[k], &Xb[k % 32], w, sj);\n" \
-"}\n" \
-"\n" \
-"__kernel __attribute__((reqd_work_group_size(64 / 8 * BLK64, 1, 1)))\n" \
-"void fwd64(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
-"{\n" \
-"	DECLARE_VAR_SQRMUL(64, BLK64);\n" \
-"	const sz_t k8 = 7 * (id & ~(8 - 1)) + id;\n" \
-"\n" \
-"	forward8i(pq, 8, &Xb[k8 % 64], 8, &x[k8], w, sj / 8);\n" \
-"	fwd8o(pq, &x[k], &Xb[k % 64], w, sj);\n" \
-"}\n" \
-"\n" \
-"__kernel __attribute__((reqd_work_group_size(128 / 8 * BLK128, 1, 1)))\n" \
-"void fwd128(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
-"{\n" \
-"	DECLARE_VAR_SQRMUL(128, BLK128);\n" \
-"	const sz_t k2 = 7 * (id & ~(2 - 1)) + id, k16 = 7 * (id & ~(16 - 1)) + id;\n" \
-"\n" \
-"	forward8i(pq, 16, &Xb[k16 % 128], 16, &x[k16], w, sj / 16);\n" \
-"	forward8o(pq, 2, &x[k2], 2, &Xb[k2 % 128], w, sj / 2);\n" \
-"}\n" \
-"\n" \
-"__kernel __attribute__((reqd_work_group_size(256 / 8 * BLK256, 1, 1)))\n" \
-"void fwd256(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
-"{\n" \
-"	DECLARE_VAR_SQRMUL(256, BLK256);\n" \
-"	const sz_t k4 = 7 * (id & ~(4 - 1)) + id, k32 = 7 * (id & ~(32 - 1)) + id;\n" \
-"\n" \
-"	forward8i(pq, 32, &Xb[k32 % 256], 32, &x[k32], w, sj / 32);\n" \
-"	forward8l(pq, 4, &Xb[k4 % 256], w, sj / 4);\n" \
-"	fwd4x2o(pq, &x[k], &Xb[k % 256], w, sj);\n" \
-"}\n" \
-"\n" \
 "__kernel __attribute__((reqd_work_group_size(512 / 8 * BLK512, 1, 1)))\n" \
 "void fwd512(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
 "{\n" \
-"	DECLARE_VAR_SQRMUL(512, BLK512);\n" \
-"	const sz_t k8 = 7 * (id & ~(8 - 1)) + id, k64 = 7 * (id & ~(64 - 1)) + id;\n" \
+"	DECLARE_VAR_SQRMUL512();\n" \
 "\n" \
 "	forward8i(pq, 64, &Xb[k64 % 512], 64, &x[k64], w, sj / 64);\n" \
 "	forward8l(pq, 8, &Xb[k8 % 512], w, sj / 8);\n" \
 "	fwd8o(pq, &x[k], &Xb[k % 512], w, sj);\n" \
 "}\n" \
+"#endif\n" \
+"\n" \
+"#if (LN_SZ == 16) || (LN_SZ == 19) || (LN_SZ == 22)\n" \
+"\n" \
+"#define DECLARE_VAR_SQRMUL1024() \\\n" \
+"	DECLARE_VAR_SQRMUL(1024, BLK1024); \\\n" \
+"	const sz_t k2 = 7 * (id & ~(2 - 1)) + id, k16 = 7 * (id & ~(16 - 1)) + id, k128 = 7 * (id & ~(128 - 1)) + id;\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(1024 / 8 * BLK1024, 1, 1)))\n" \
+"void square1024(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
+"{\n" \
+"	DECLARE_VAR_SQRMUL1024();\n" \
+"\n" \
+"	forward8i(pq, 128, &Xb[k128 % 1024], 128, &x[k128], w, sj / 128);\n" \
+"	forward8l(pq, 16, &Xb[k16 % 1024], w, sj / 16);\n" \
+"	forward8l(pq, 2, &Xb[k2 % 1024], w, sj / 2);\n" \
+"	square2x4l(pq, &Xb[k % 1024], w, sj);\n" \
+"	backward8l(pq, 2, &Xb[k2 % 1024], w, sj / 2);\n" \
+"	backward8l(pq, 16, &Xb[k16 % 1024], w, sj / 16);\n" \
+"	backward8o(pq, 128, &x[k128], 128, &Xb[k128 % 1024], w, sj / 128);\n" \
+"}\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(1024 / 8 * BLK1024, 1, 1)))\n" \
+"void mul1024(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
+"{\n" \
+"	DECLARE_VAR_SQRMUL1024();\n" \
+"	DECLARE_VARP_REG();\n" \
+"\n" \
+"	forward8i(pq, 128, &Xb[k128 % 1024], 128, &x[k128], w, sj / 128);\n" \
+"	forward8l(pq, 16, &Xb[k16 % 1024], w, sj / 16);\n" \
+"	forward8l(pq, 2, &Xb[k2 % 1024], w, sj / 2);\n" \
+"	mul2x4l(pq, &Xb[k % 1024], &xp[k], w, sj);\n" \
+"	backward8l(pq, 2, &Xb[k2 % 1024], w, sj / 2);\n" \
+"	backward8l(pq, 16, &Xb[k16 % 1024], w, sj / 16);\n" \
+"	backward8o(pq, 128, &x[k128], 128, &Xb[k128 % 1024], w, sj / 128);\n" \
+"}\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(1024 / 8 * BLK1024, 1, 1)))\n" \
+"void fwd1024(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
+"{\n" \
+"	DECLARE_VAR_SQRMUL1024();\n" \
+"\n" \
+"	forward8i(pq, 128, &Xb[k128 % 1024], 128, &x[k128], w, sj / 128);\n" \
+"	forward8l(pq, 16, &Xb[k16 % 1024], w, sj / 16);\n" \
+"	forward8o(pq, 2, &x[k2], 2, &Xb[k2 % 1024], w, sj / 2);\n" \
+"}\n" \
+"#endif\n" \
+"\n" \
+"#if (LN_SZ == 20) || (LN_SZ == 23)\n" \
+"\n" \
+"#define DECLARE_VAR_SQRMUL2048() \\\n" \
+"	DECLARE_VAR_SQRMUL(2048, BLK2048); \\\n" \
+"	const sz_t k4 = 7 * (id & ~(4 - 1)) + id, k32 = 7 * (id & ~(32 - 1)) + id, k256 = 7 * (id & ~(256 - 1)) + id;\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(2048 / 8 * BLK2048, 1, 1)))\n" \
+"void square2048(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
+"{\n" \
+"	DECLARE_VAR_SQRMUL2048();\n" \
+"\n" \
+"	forward8i(pq, 256, &Xb[k256 % 2048], 256, &x[k256], w, sj / 256);\n" \
+"	forward8l(pq, 32, &Xb[k32 % 2048], w, sj / 32);\n" \
+"	forward8l(pq, 4, &Xb[k4 % 2048], w, sj / 4);\n" \
+"	square4x2l(pq, &Xb[k % 2048], w, sj);\n" \
+"	backward8l(pq, 4, &Xb[k4 % 2048], w, sj / 4);\n" \
+"	backward8l(pq, 32, &Xb[k32 % 2048], w, sj / 32);\n" \
+"	backward8o(pq, 256, &x[k256], 256, &Xb[k256 % 2048], w, sj / 256);\n" \
+"}\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(2048 / 8 * BLK2048, 1, 1)))\n" \
+"void mul2048(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const uint_32 reg_xp)\n" \
+"{\n" \
+"	DECLARE_VAR_SQRMUL2048();\n" \
+"	DECLARE_VARP_REG();\n" \
+"\n" \
+"	forward8i(pq, 256, &Xb[k256 % 2048], 256, &x[k256], w, sj / 256);\n" \
+"	forward8l(pq, 32, &Xb[k32 % 2048], w, sj / 32);\n" \
+"	forward8l(pq, 4, &Xb[k4 % 2048], w, sj / 4);\n" \
+"	mul4x2l(pq, &Xb[k % 2048], &xp[k], w, sj);\n" \
+"	backward8l(pq, 4, &Xb[k4 % 2048], w, sj / 4);\n" \
+"	backward8l(pq, 32, &Xb[k32 % 2048], w, sj / 32);\n" \
+"	backward8o(pq, 256, &x[k256], 256, &Xb[k256 % 2048], w, sj / 256);\n" \
+"}\n" \
+"\n" \
+"__kernel __attribute__((reqd_work_group_size(2048 / 8 * BLK2048, 1, 1)))\n" \
+"void fwd2048(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w)\n" \
+"{\n" \
+"	DECLARE_VAR_SQRMUL2048();\n" \
+"\n" \
+"	forward8i(pq, 256, &Xb[k256 % 2048], 256, &x[k256], w, sj / 256);\n" \
+"	forward8l(pq, 32, &Xb[k32 % 2048], w, sj / 32);\n" \
+"	forward8l(pq, 4, &Xb[k4 % 2048], w, sj / 4);\n" \
+"	fwd4x2o(pq, &x[k], &Xb[k % 2048], w, sj);\n" \
+"}\n" \
+"#endif\n" \
 "\n" \
 "// --- carry ---\n" \
 "\n" \

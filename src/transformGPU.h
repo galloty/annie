@@ -144,8 +144,6 @@ private:
 	static const size_t Reg_w_R = 3, Reg_w_Q = 4, Reg_N_Q = 5, Reg_Ninv_R = 6, Reg_t_Q = 7, Reg_t = 8, Reg_one = 9, Reg_count = 10;
 	int _ln = 0;
 	int _lbase = 0;
-	int _lm0 = 0;
-	size_t _s0 = 0;
 	bool _init_failed = false;
 	mpz_t _Nz;
 	engine * _engine = nullptr;
@@ -195,16 +193,11 @@ private:
 		const int ln = _ln;
 		engine * const eng = _engine;
 
-		if      (ln <= 6) { eng->forward8_0(reg_x, reg_w); }
-		else if (ln <= 9) { eng->forward64_0(reg_x, reg_w); }
-		else if (ln <= 12) { eng->forward512_0(reg_x, reg_w); }
-		else 
-		{
-			int lm = _ln - 3; size_t s = 1;
-			eng->forward8_0(reg_x, reg_w);
-			lm -= 3, s *= 8;
-			for (int lm0 = _lm0; lm >= lm0; lm -= 3, s *= 8) eng->forward8(reg_x, reg_w, lm, s);
-		}
+		if (ln <= 12) eng->forward8_0(reg_x, reg_w);
+		else if (ln <= 16) eng->forward64_0(reg_x, reg_w);
+		else eng->forward512_0(reg_x, reg_w);
+
+		if (ln >= 21) eng->forward8(reg_x, reg_w, ln - 3 - 9, 512);
 	}
 
 	void NTT_inverse8(const size_t reg_x, const size_t reg_w)
@@ -212,109 +205,30 @@ private:
 		const int ln = _ln;
 		engine * const eng = _engine;
 
-		if      (ln <= 6) { eng->backward8_0(reg_x, reg_w); }
-		else if (ln <= 9) { eng->backward64_0(reg_x, reg_w); }
-		else if (ln <= 12) { eng->backward512_0(reg_x, reg_w); }
-		else
-		{
-			size_t s = _s0;
-			for (int lm = _lm0; lm <= _ln - 3; lm += 3, s /= 8) eng->backward8(reg_x, reg_w, lm, s);
-		}
+		if (ln >= 21) eng->backward8(reg_x, reg_w, ln - 3 - 9, 512);
+
+		if (ln <= 12) eng->backward8_0(reg_x, reg_w);
+		else if (ln <= 16) eng->backward64_0(reg_x, reg_w);
+		else eng->backward512_0(reg_x, reg_w);
 	}
 
 	void NTT_forward(const size_t reg_x, const size_t reg_w)
 	{
-		const int ln = _ln;
-		engine * const eng = _engine;
-
 		NTT_forward8(reg_x, reg_w);
-
-		if      (ln == 4) {}
-		else if (ln == 5) eng->fwd4x2(reg_x, reg_w);
-		else if (ln == 6) eng->fwd8(reg_x, reg_w);
-		else if (ln == 7) {}
-		else if (ln == 8) eng->fwd4x2(reg_x, reg_w);
-		else if (ln == 9) eng->fwd8(reg_x, reg_w);
-		else if (ln == 10) {}
-		else if (ln == 11) eng->fwd4x2(reg_x, reg_w);
-		else if (ln == 12) eng->fwd8(reg_x, reg_w);
-		else
-		{
-			const int lm0 = _lm0;
-			if      (lm0 == 9) eng->fwd512(reg_x, reg_w);
-			else if (lm0 == 8) eng->fwd256(reg_x, reg_w);
-			else if (lm0 == 7) eng->fwd128(reg_x, reg_w);
-			else if (lm0 == 6) eng->fwd64(reg_x, reg_w);
-			else if (lm0 == 5) eng->fwd32(reg_x, reg_w);
-			else if (lm0 == 4) eng->fwd16(reg_x, reg_w);
-			else if (lm0 == 3) eng->fwd8(reg_x, reg_w);
-			else if (lm0 == 2) eng->fwd4x2(reg_x, reg_w);
-		}
+		_engine->fwd(reg_x, reg_w);
 	}
 
 	void square(const size_t reg_x, const size_t reg_w)
 	{
-		const int ln = _ln;
-		engine * const eng = _engine;
-
 		NTT_forward8(reg_x, reg_w);
-
-		if      (ln == 4) eng->square2x4(reg_x, reg_w);
-		else if (ln == 5) eng->square4x2(reg_x, reg_w);
-		else if (ln == 6) eng->square8(reg_x, reg_w);
-		else if (ln == 7) eng->square2x4(reg_x, reg_w);
-		else if (ln == 8) eng->square4x2(reg_x, reg_w);
-		else if (ln == 9) eng->square8(reg_x, reg_w);
-		else if (ln == 10) eng->square2x4(reg_x, reg_w);
-		else if (ln == 11) eng->square4x2(reg_x, reg_w);
-		else if (ln == 12) eng->square8(reg_x, reg_w);
-		else
-		{
-			const int lm0 = _lm0;
-			if      (lm0 == 9) eng->square512(reg_x, reg_w);
-			else if (lm0 == 8) eng->square256(reg_x, reg_w);
-			else if (lm0 == 7) eng->square128(reg_x, reg_w);
-			else if (lm0 == 6) eng->square64(reg_x, reg_w);
-			else if (lm0 == 5) eng->square32(reg_x, reg_w);
-			else if (lm0 == 4) eng->square16(reg_x, reg_w);
-			else if (lm0 == 3) eng->square8(reg_x, reg_w);
-			else if (lm0 == 2) eng->square4x2(reg_x, reg_w);
-			else if (lm0 == 1) eng->square2x4(reg_x, reg_w);
-		}
-
+		_engine->square(reg_x, reg_w);
 		NTT_inverse8(reg_x, reg_w);
 	}
 
 	void mul_const(const size_t reg_y, const size_t reg_x, const size_t reg_w)
 	{
-		const int ln = _ln;
-		engine * const eng = _engine;
-
 		NTT_forward8(reg_y, reg_w);
-
-		if      (ln == 4) eng->mul2x4(reg_y, reg_x, reg_w);
-		else if (ln == 5) eng->mul4x2(reg_y, reg_x, reg_w);
-		else if (ln == 6) eng->mul8(reg_y, reg_x, reg_w);
-		else if (ln == 7) eng->mul2x4(reg_y, reg_x, reg_w);
-		else if (ln == 8) eng->mul4x2(reg_y, reg_x, reg_w);
-		else if (ln == 9) eng->mul8(reg_y, reg_x, reg_w);
-		else if (ln == 10) eng->mul2x4(reg_y, reg_x, reg_w);
-		else if (ln == 11) eng->mul4x2(reg_y, reg_x, reg_w);
-		else if (ln == 12) eng->mul8(reg_y, reg_x, reg_w);
-		else
-		{
-			const int lm0 = _lm0;
-			if      (lm0 == 9) eng->mul512(reg_y, reg_x, reg_w);
-			else if (lm0 == 8) eng->mul256(reg_y, reg_x, reg_w);
-			else if (lm0 == 7) eng->mul128(reg_y, reg_x, reg_w);
-			else if (lm0 == 6) eng->mul64(reg_y, reg_x, reg_w);
-			else if (lm0 == 5) eng->mul32(reg_y, reg_x, reg_w);
-			else if (lm0 == 4) eng->mul16(reg_y, reg_x, reg_w);
-			else if (lm0 == 3) eng->mul8(reg_y, reg_x, reg_w);
-			else if (lm0 == 2) eng->mul4x2(reg_y, reg_x, reg_w);
-			else if (lm0 == 1) eng->mul2x4(reg_y, reg_x, reg_w);
-		}
-
+		_engine->mul(reg_y, reg_x, reg_w);
 		NTT_inverse8(reg_y, reg_w);
 	}
 
@@ -475,10 +389,6 @@ public:
 			}
 		}
 
-		int lm = ln - 3; size_t s = 1;
-		for (; lm > 9; lm -= 3, s *= 8);
-		_lm0 = lm; _s0 = s;
-
 		const size_t n = size_t(1) << ln;
 		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
 
@@ -496,39 +406,9 @@ public:
 		_engine = new engine(ln, device_id);
 		engine * const eng = _engine;
 
-		std::cout << "ln = " << ln << ": ";
-		if      (ln <= 6) std::cout << "forward8_0";
-		else if (ln <= 9) std::cout << "forward64_0";
-		else if (ln <= 12) std::cout << "forward512_0";
-		if      (ln == 4) std::cout << " square2x4";
-		else if (ln == 5) std::cout << " square4x2";
-		else if (ln == 6) std::cout << " square8";
-		else if (ln == 7) std::cout << " square2x4";
-		else if (ln == 8) std::cout << " square4x2";
-		else if (ln == 9) std::cout << " square8";
-		else if (ln == 10) std::cout << " square2x4";
-		else if (ln == 11) std::cout << " square4x2";
-		else if (ln == 12) std::cout << " square8";
-		else
-		{
-			lm = ln - 3; s = 1;
-			std::cout << "forward8_0";
-			lm -= 3, s *= 8;
-			for (int lm0 = _lm0; lm >= lm0; lm -= 3, s *= 8) std::cout << " forward8(" << lm << ", " << s << ")";
-			if      (_lm0 == 9) std::cout << " square512";
-			else if (_lm0 == 8) std::cout << " square256";
-			else if (_lm0 == 7) std::cout << " square128";
-			else if (_lm0 == 6) std::cout << " square64 " << BLK64 << ", " << eng->get_blk64();
-			else if (_lm0 == 5) std::cout << " square32 " << BLK32 << ", " << eng->get_blk32();
-			else if (_lm0 == 4) std::cout << " square16 " << BLK16 << ", " << eng->get_blk16();
-			else if (_lm0 == 3) std::cout << " square8";
-			else if (_lm0 == 2) std::cout << " square4x2";
-			else if (_lm0 == 1) std::cout << " square2x4";
-		}
-		std::cout << std::endl;
-
 		std::ostringstream src;
 
+		src << "#define LN_SZ\t" << ln << std::endl;
 		src << "#define N_SZ\t" << n << "u" << std::endl;
 		src << "#define LBASE\t" << lbase << std::endl;
 
@@ -553,17 +433,18 @@ public:
 
 		src << "#define Z_OFFSET\t" << (Reg_count * n) << "u" << std::endl;
 
-		src << "#define BLK16\t" << eng->get_blk16() << std::endl;	// TODO remove
-		src << "#define BLK32\t" << eng->get_blk32() << std::endl;
-		src << "#define BLK64\t" << eng->get_blk64() << std::endl;
+		src << "#define BLK16\t" << BLK16 << std::endl;
+		src << "#define BLK32\t" << BLK32 << std::endl;
+		src << "#define BLK64\t" << BLK64 << std::endl;
 		src << "#define BLK128\t" << BLK128 << std::endl;
 		src << "#define BLK256\t" << BLK256 << std::endl;
 		src << "#define BLK512\t" << BLK512 << std::endl;
+		src << "#define BLK1024\t" << BLK1024 << std::endl;
+		src << "#define BLK2048\t" << BLK2048 << std::endl;
 
 		src << "#define CHUNK64\t" << CHUNK64 << std::endl;
 		src << "#define CHUNK512\t" << CHUNK512 << std::endl;
 
-// std::cout << src.str() << std::endl;
 		if (!eng->readOpenCL("ocl/kernel.cl", "src/ocl/kernel.h", "src_ocl_kernel", src)) src << src_ocl_kernel;
 
 		eng->loadProgram(src.str());
