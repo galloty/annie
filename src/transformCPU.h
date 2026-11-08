@@ -13,6 +13,8 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #include "transform.h"
 
+#define BALANCED	true
+
 // The prime finite field Z/PZ
 template<uint32_t P, uint32_t Q, uint32_t R, uint32_t RSQ, uint32_t H>
 class ZPT
@@ -577,7 +579,9 @@ private:
 				f += int64_t(x[k].get());
 				int32_t r = int32_t(uint32_t(f) & (base - 1));
 				f >>= lbase;
-				// if (r >= int32_t(base / 2)) { r -= int32_t(base); f += 1; }	// balanced
+#if defined(BALANCED)
+				if (r >= int32_t(base / 2)) { r -= int32_t(base); f += 1; }
+#endif
 				x[k].set_int(r);
 			}
 			const size_t k = i * CARRY_LENGTH + CARRY_LENGTH - 1;
@@ -596,7 +600,6 @@ private:
 #else
 		(void)who;
 #endif
-
 		if (x[n - 1].get() == base - 1)
 		{
 			size_t i = 2; for (; i < n; ++i) { if (x[n - i].get() != base - 1) break; }
@@ -624,7 +627,6 @@ private:
 			x[n - 1].set_int(hi - int32_t(base));
 			x[0].set_int(x[0].get_int() - l0);
 		}
-
 	}
 
 	void positive(RNS * const x, const int32_t l0)
@@ -648,9 +650,13 @@ private:
 
 	void mod_Q(RNS * const x)
 	{
+#if !defined(BALANCED)
 		fix_base(x, "Q");
+#endif
 		lower(x, 1);	// < Q - 1
+#if !defined(BALANCED)
 		positive(x, 1);	// >= 0
+#endif
 
 #if defined(CHECK_THEOREM)
 		const size_t n = size_t(1) << _ln;
@@ -661,32 +667,53 @@ private:
 		for (size_t i = 0; i < n; ++i)
 		{
 			const size_t j = n - 1 - i;
-			const int32_t u = x[j].get_int();
+			int32_t u = x[j].get_int();
 			if (u != 0)
 			{
-				if (u < 0) throw std::runtime_error("Q_min < 0");
-				const double du = (j > 0) ? double(u) + x[j - 1].get_int() / base : double(u);
-				log_q = std::log2(du) + j * double(lbase);
+				if (u < 0)
+				{
+#if !defined(BALANCED)
+					throw std::runtime_error("Q_min < 0");
+#else
+					mpz_t t; mpz_init(t);
+					get_mpz(t, x);
+					if (mpz_sgn(t) < 0) throw std::runtime_error("Q_min < 0");
+					long ex; const double mx = mpz_get_d_2exp(&ex, t);
+					log_q = std::log2(mx) + ex;
+					mpz_clear(t);
+#endif
+				}
+				else
+				{
+					const double du = (j > 0) ? double(u) + x[j - 1].get_int() / base : double(u);
+					if (du != 0) log_q = std::log2(std::fabs(du)) + j * double(lbase);
+				}
 				break;
 			}
 		}
 		if (log_q < _logq_min) _logq_min = log_q;
-		if (log_q > _logq_max) _logq_max = log_q;
-
-		const double q_max = pow(2.0, _logq_max - _logN);
- 		if (q_max > 4)
+		if (log_q > _logq_max)
 		{
-			std::ostringstream ss; ss << "Q_max >" << q_max;
-			throw std::runtime_error(ss.str());
+			_logq_max = log_q;
+			const double q_max = pow(2.0, _logq_max - _logN);
+			if (q_max > 4)
+			{
+				std::ostringstream ss; ss << "Q_max / N = " << q_max << " = 2^" << _logq_max - _logN;
+				throw std::runtime_error(ss.str());
+			}
 		}
 #endif
 	}
 
 	void mod_R_add2(RNS * const x)
 	{
+#if !defined(BALANCED)
 		fix_base(x, "R");
+#endif
 		lower(x, -1);		// <= R
+#if !defined(BALANCED)
 		positive(x, -1);	// >= 0
+#endif
 
 		x[0].set_int(x[0].get_int() + 2);
 	}

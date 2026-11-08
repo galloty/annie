@@ -13,7 +13,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #include "file.h"
 
-#define CHECK_THEOREM	true
+// #define CHECK_THEOREM	true
 
 class transform
 {
