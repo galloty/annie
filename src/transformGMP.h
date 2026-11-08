@@ -22,7 +22,7 @@ private:
 	mpz_t _t_Q, _t;
 	mpz_t _reg[reg_count];
 #if defined(CHECK_THEOREM)
-	double _d_min = 1000, _d_max = -1000;
+	double _q_min = 1000, _q_max = -1000;
 #endif
 
 private:
@@ -103,16 +103,16 @@ private:
 #if defined(CHECK_THEOREM)
 		long e_x; const double m_x = mpz_get_d_2exp(&e_x, x);
 		long e_n; const double m_n = mpz_get_d_2exp(&e_n, _N);
-		const double d = m_x / m_n * std::pow(2.0, e_x - e_n);
-		if (d < _d_min) _d_min = d;
-		if (d > _d_max) _d_max = d;
-		if ((_d_min < 0) || (_d_max > 4))
+		const double q = m_x / m_n * std::pow(2.0, e_x - e_n);
+		if (q < _q_min) _q_min = q;
+		if (q > _q_max) _q_max = q;
+		if ((_q_min < 0) || (_q_max > 4))
 		{
-			std::ostringstream ss; ss << "Q_min = " << _d_min << ", Q_max = " << _d_max << std::endl;
+			std::ostringstream ss; ss << "Q_min / N = " << _q_min << ", Q_max / N = " << _q_max;
 			throw std::runtime_error(ss.str());
 		}
-	}
 #endif
+	}
 
 	void mulMMGW(mpz_t & x, const mpz_t & y)
 	{
@@ -194,7 +194,7 @@ public:
 	virtual ~transformGMP()
 	{
 #if defined(CHECK_THEOREM)
-		std::cout << "Q_min = " << _d_min << ", Q_max = " << _d_max << std::endl;
+		std::cout << "Q_min / N = " << _q_min << ", Q_max / N = " << _q_max << std::endl;
 #endif
 		mpz_clears(_N, _Ninv, _R, _Q, _one, _t_Q, _t, nullptr);
 		for (size_t i = 0; i < reg_count; ++i) mpz_clear(_reg[i]);
