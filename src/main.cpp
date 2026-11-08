@@ -151,7 +151,7 @@ public:
 
 		std::cout << header(args) << std::endl;
 
-#ifdef QUICK_TEST
+#if defined(QUICK_TEST)
 		_instance = new annie();
 
 		mpz_t n; mpz_init(n);

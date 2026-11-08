@@ -1046,10 +1046,41 @@ INLINE int_64 garner2(const ZP r1, const ZP r2)
 	return (int_64)(n - (b ? P1P2 : 0));
 }
 
+INLINE void read4(int_32 r[CARRY_LENGTH], const __global ZP * restrict const xi)
+{
+	const ZP4 x_4 = load4g(xi, 0);
+	r[0] = get_int((int_32)(x_4.s0), P1); r[1] = get_int((int_32)(x_4.s1), P1);
+	r[2] = get_int((int_32)(x_4.s2), P1); r[3] = get_int((int_32)(x_4.s3), P1);
+}
+
+INLINE void store4(__global ZP * restrict const xi, const int_32 r[CARRY_LENGTH])
+{
+	ZP4 x_4;
+	x_4.s0 = set_int(r[0], P1); x_4.s1 = set_int(r[1], P1); x_4.s2 = set_int(r[2], P1); x_4.s3 = set_int(r[3], P1);
+	store4g(xi, 0, x_4);
+	x_4.s0 = set_int(r[0], P2); x_4.s1 = set_int(r[1], P2); x_4.s2 = set_int(r[2], P2); x_4.s3 = set_int(r[3], P2);
+	store4g(xi, Z_OFFSET / 4, x_4);
+}
+
+INLINE void set_carry(int_32 r[CARRY_LENGTH], const int_64 f0)
+{
+	int_64 f = f0;
+	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)
+	{
+		f += r[j];
+		int_32 u = (int_32)((uint_32)(f) & (BASE - 1));
+		f >>= LBASE;
+		if (u >= (int_32)(BASE / 2)) { u -= (int_32)(BASE); f += 1; }	// balanced
+		r[j] = u;
+	}
+	f += r[CARRY_LENGTH - 1];
+	r[CARRY_LENGTH - 1] = (int_32)(f);
+}
+
 #define NULL_PTR	((__global const ZP *)0)
 
 INLINE void carry_mul_sub_1(const __global ZP * restrict const xi, __global const ZP * restrict const yi,
-	__global int_64 * restrict const carry, __local int_64 * const cl, uint_32 r[CARRY_LENGTH], const sz_t id, const int_32 a)
+	__global int_64 * restrict const carry, __local int_64 * const cl, int_32 r[CARRY_LENGTH], const sz_t id, const int_32 a)
 {
 	// assert CARRY_LENGTH = 4
 	const ZP4 x1_4 = load4g(xi, 0), x2_4 = load4g(xi, Z_OFFSET / 4);
@@ -1063,7 +1094,7 @@ INLINE void carry_mul_sub_1(const __global ZP * restrict const xi, __global cons
 		const ZP u1 = mulmod(x1[j], NORM1, PQ1), u2 = mulmod(x2[j], NORM2, PQ2);
 		f += a * garner2(u1, u2);
 		if (yi != NULL_PTR) f -= get_int(yi[j], P1);
-		r[j] = (uint_32)(f) & (BASE - 1);
+		r[j] = (int_32)((uint_32)(f) & (BASE - 1));
 		f >>= LBASE;
 	}
 
@@ -1074,26 +1105,14 @@ INLINE void carry_mul_sub_1(const __global ZP * restrict const xi, __global cons
 }
 
 INLINE void carry_2(__global ZP * restrict const xi, const __local int_64 * const cl,
-	uint_32 r[CARRY_LENGTH], const sz_t id)
+	int_32 r[CARRY_LENGTH], const sz_t id)
 {
 	const sz_t lid = id % CARRY_WG_SZ;
 	int_64 f = (lid != 0) ? cl[lid - 1] : (int_64)(0);
 
-	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)
-	{
-		f += (int_64)(r[j]);
-		r[j] = (uint_32)(f) & (BASE - 1);
-		f >>= LBASE;
-		if (f == 0) break;
-	}
-	f += (int_64)(r[CARRY_LENGTH - 1]);
-
+	set_carry(r, f);
 	// assert CARRY_LENGTH = 4
-	ZP4 x_4; x_4.s0 = r[0]; x_4.s1 = r[1]; x_4.s2 = r[2];
-	x_4.s3 = set_int((int_32)(f), P1);
-	store4g(xi, 0, x_4);
-	x_4.s3 = set_int((int_32)(f), P2);
-	store4g(xi, Z_OFFSET / 4, x_4);
+	store4(xi, r);
 }
 
 __kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))
@@ -1102,7 +1121,7 @@ void carry_mul(__global ZP * restrict const reg, __global int_64 * restrict cons
 	const sz_t id = (sz_t)get_global_id(0);
 	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];
 	__local int_64 cl[CARRY_WG_SZ];
-	uint_32 r[CARRY_LENGTH];
+	int_32 r[CARRY_LENGTH];
 
 	carry_mul_sub_1(xi, NULL_PTR, carry, cl, r, id, a);
 	barrier(CLK_LOCAL_MEM_FENCE);
@@ -1116,7 +1135,7 @@ void carry_sub(__global ZP * restrict const reg, __global int_64 * restrict cons
 	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];
 	__global const ZP * restrict const yi = &reg[reg_y * N_SZ + CARRY_LENGTH * id];
 	__local int_64 cl[CARRY_WG_SZ];
-	uint_32 r[CARRY_LENGTH];
+	int_32 r[CARRY_LENGTH];
 
 	carry_mul_sub_1(xi, yi, carry, cl, r, id, 1);
 	barrier(CLK_LOCAL_MEM_FENCE);
@@ -1128,29 +1147,15 @@ void carry_complete(__global ZP * restrict const reg, __global const int_64 * re
 {
 	const sz_t id = (sz_t)get_global_id(0);
 	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * CARRY_WG_SZ * id];
-	uint_32 r[CARRY_LENGTH];
+	int_32 r[CARRY_LENGTH];
 
 	int_64 f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];
 	if ((id == 0) && (is_nega != 0)) f = -f;
 
 	// assert CARRY_LENGTH = 4
-	const ZP4 x1_4 = load4g(xi, 0);
-	r[0] = x1_4.s0; r[1] = x1_4.s1; r[2] = x1_4.s2; r[3] = x1_4.s3;
-
-	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)
-	{
-		f += (int_64)(r[j]);
-		r[j] = (uint_32)(f) & (BASE - 1);
-		f >>= LBASE;
-	}
-	f += (int_64)(r[CARRY_LENGTH - 1]);
-
-	// assert CARRY_LENGTH = 4
-	ZP4 x_4; x_4.s0 = r[0]; x_4.s1 = r[1]; x_4.s2 = r[2];
-	x_4.s3 = set_int((int_32)(f), P1);
-	store4g(xi, 0, x_4);
-	x_4.s3 = set_int((int_32)(f), P2);
-	store4g(xi, Z_OFFSET / 4, x_4);
+	read4(r, xi);	
+	set_carry(r, f);
+	store4(xi, r);
 }
 
 // --- strict modulo ---
@@ -1160,21 +1165,15 @@ INLINE void set_rns(__global ZP * restrict const x, const int i)
 	x[0] = set_int(i, P1); x[0 + Z_OFFSET] = set_int(i, P2);
 }
 
-// b-1, b-1, ..., b-1, b + a, ... => b, 0, ..., 0, a, ...
-INLINE void fix_base(__global ZP * restrict const x)
+INLINE void lower(__global ZP * restrict const x, const int_32 l0)
 {
-	if (x[N_SZ - 1] == BASE - 1)
+	int_32 hi = get_int(x[N_SZ - 1], P1);
+	if (hi >= (int_32)(BASE))	// >= base^n
 	{
-		sz_t i = 2; for (; i < N_SZ; ++i) { if (x[N_SZ - i] != BASE - 1) break; }
-		if (get_int(x[N_SZ - i], P1) >= (int_32)(BASE))
-		{
-			x[N_SZ - i] -= BASE; x[N_SZ - i + Z_OFFSET] -= BASE;
-			for (sz_t j = i - 1; j >= 2; --j)
-			{
-				x[N_SZ - j] = 0; x[N_SZ - j + Z_OFFSET] = 0;
-			}
-			x[N_SZ - 1] = BASE; x[N_SZ - 1 + Z_OFFSET] = BASE;
-		}
+		int_32 lo = get_int(x[0], P1);
+		hi -= (int_32)(BASE); lo -= l0;	// - R or Q
+		set_rns(&x[N_SZ - 1], hi);
+		set_rns(&x[0], lo);
 	}
 }
 
@@ -1183,23 +1182,7 @@ void mod_Q(__global ZP * restrict const reg, const uint_32 reg_x)
 {
 	__global ZP * restrict const x = &reg[reg_x * N_SZ];
 
-	fix_base(x);
-
-	int_32 hi = get_int(x[N_SZ - 1], P1);
-	if (hi < 0)
-	{
-		int_32 lo = get_int(x[0], P1);
-		hi += (int_32)(BASE); lo += 1;	// + Q
-		set_rns(&x[N_SZ - 1], hi);
-		set_rns(&x[0], lo);
-	}
-	else if (hi >= (int_32)(BASE))
-	{
-		int_32 lo = get_int(x[0], P1);
-		hi -= (int_32)(BASE); lo -= 1;	// - Q
-		set_rns(&x[N_SZ - 1], hi);
-		set_rns(&x[0], lo);
-	}
+	lower(x, 1);	// < Q - 1
 }
 
 __kernel
@@ -1207,19 +1190,9 @@ void mod_R_add2(__global ZP * restrict const reg, const uint_32 reg_x)
 {
 	__global ZP * restrict const x = &reg[reg_x * N_SZ];
 
-	fix_base(x);
+	lower(x, -1);		// <= R
 
-	int_32 hi = get_int(x[N_SZ - 1], P1), lo = get_int(x[0], P1);
-	if (hi < 0)
-	{
-		hi += (int_32)(BASE); lo -= 1;	// + R
-		set_rns(&x[N_SZ - 1], hi);
-	}
-	else if (hi >= (int_32)(BASE))
-	{
-		hi -= (int_32)(BASE); lo += 1;	// - R
-		set_rns(&x[N_SZ - 1], hi);
-	}
+	const int_32 lo = get_int(x[0], P1);
 	set_rns(&x[0], lo + 2);
 }
 

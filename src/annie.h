@@ -165,6 +165,8 @@ private:
 
 	void save_checkpoint(const int i, const double elapsed_time) const
 	{
+		if (!_transform->has_checkpoint()) return;
+
 		const std::string checkpoint_file = _checkpoint_filename, old_checkpoint_file = checkpoint_file + ".old", new_checkpoint_file = checkpoint_file + ".new";
 
 		{

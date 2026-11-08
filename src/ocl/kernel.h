@@ -1058,10 +1058,41 @@ static const char * const src_ocl_kernel = \
 "	return (int_64)(n - (b ? P1P2 : 0));\n" \
 "}\n" \
 "\n" \
+"INLINE void read4(int_32 r[CARRY_LENGTH], const __global ZP * restrict const xi)\n" \
+"{\n" \
+"	const ZP4 x_4 = load4g(xi, 0);\n" \
+"	r[0] = get_int((int_32)(x_4.s0), P1); r[1] = get_int((int_32)(x_4.s1), P1);\n" \
+"	r[2] = get_int((int_32)(x_4.s2), P1); r[3] = get_int((int_32)(x_4.s3), P1);\n" \
+"}\n" \
+"\n" \
+"INLINE void store4(__global ZP * restrict const xi, const int_32 r[CARRY_LENGTH])\n" \
+"{\n" \
+"	ZP4 x_4;\n" \
+"	x_4.s0 = set_int(r[0], P1); x_4.s1 = set_int(r[1], P1); x_4.s2 = set_int(r[2], P1); x_4.s3 = set_int(r[3], P1);\n" \
+"	store4g(xi, 0, x_4);\n" \
+"	x_4.s0 = set_int(r[0], P2); x_4.s1 = set_int(r[1], P2); x_4.s2 = set_int(r[2], P2); x_4.s3 = set_int(r[3], P2);\n" \
+"	store4g(xi, Z_OFFSET / 4, x_4);\n" \
+"}\n" \
+"\n" \
+"INLINE void set_carry(int_32 r[CARRY_LENGTH], const int_64 f0)\n" \
+"{\n" \
+"	int_64 f = f0;\n" \
+"	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
+"	{\n" \
+"		f += r[j];\n" \
+"		int_32 u = (int_32)((uint_32)(f) & (BASE - 1));\n" \
+"		f >>= LBASE;\n" \
+"		if (u >= (int_32)(BASE / 2)) { u -= (int_32)(BASE); f += 1; }	// balanced\n" \
+"		r[j] = u;\n" \
+"	}\n" \
+"	f += r[CARRY_LENGTH - 1];\n" \
+"	r[CARRY_LENGTH - 1] = (int_32)(f);\n" \
+"}\n" \
+"\n" \
 "#define NULL_PTR	((__global const ZP *)0)\n" \
 "\n" \
 "INLINE void carry_mul_sub_1(const __global ZP * restrict const xi, __global const ZP * restrict const yi,\n" \
-"	__global int_64 * restrict const carry, __local int_64 * const cl, uint_32 r[CARRY_LENGTH], const sz_t id, const int_32 a)\n" \
+"	__global int_64 * restrict const carry, __local int_64 * const cl, int_32 r[CARRY_LENGTH], const sz_t id, const int_32 a)\n" \
 "{\n" \
 "	// assert CARRY_LENGTH = 4\n" \
 "	const ZP4 x1_4 = load4g(xi, 0), x2_4 = load4g(xi, Z_OFFSET / 4);\n" \
@@ -1075,7 +1106,7 @@ static const char * const src_ocl_kernel = \
 "		const ZP u1 = mulmod(x1[j], NORM1, PQ1), u2 = mulmod(x2[j], NORM2, PQ2);\n" \
 "		f += a * garner2(u1, u2);\n" \
 "		if (yi != NULL_PTR) f -= get_int(yi[j], P1);\n" \
-"		r[j] = (uint_32)(f) & (BASE - 1);\n" \
+"		r[j] = (int_32)((uint_32)(f) & (BASE - 1));\n" \
 "		f >>= LBASE;\n" \
 "	}\n" \
 "\n" \
@@ -1086,26 +1117,14 @@ static const char * const src_ocl_kernel = \
 "}\n" \
 "\n" \
 "INLINE void carry_2(__global ZP * restrict const xi, const __local int_64 * const cl,\n" \
-"	uint_32 r[CARRY_LENGTH], const sz_t id)\n" \
+"	int_32 r[CARRY_LENGTH], const sz_t id)\n" \
 "{\n" \
 "	const sz_t lid = id % CARRY_WG_SZ;\n" \
 "	int_64 f = (lid != 0) ? cl[lid - 1] : (int_64)(0);\n" \
 "\n" \
-"	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
-"	{\n" \
-"		f += (int_64)(r[j]);\n" \
-"		r[j] = (uint_32)(f) & (BASE - 1);\n" \
-"		f >>= LBASE;\n" \
-"		if (f == 0) break;\n" \
-"	}\n" \
-"	f += (int_64)(r[CARRY_LENGTH - 1]);\n" \
-"\n" \
+"	set_carry(r, f);\n" \
 "	// assert CARRY_LENGTH = 4\n" \
-"	ZP4 x_4; x_4.s0 = r[0]; x_4.s1 = r[1]; x_4.s2 = r[2];\n" \
-"	x_4.s3 = set_int((int_32)f, P1);\n" \
-"	store4g(xi, 0, x_4);\n" \
-"	x_4.s3 = set_int((int_32)f, P2);\n" \
-"	store4g(xi, Z_OFFSET / 4, x_4);\n" \
+"	store4(xi, r);\n" \
 "}\n" \
 "\n" \
 "__kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))\n" \
@@ -1114,7 +1133,7 @@ static const char * const src_ocl_kernel = \
 "	const sz_t id = (sz_t)get_global_id(0);\n" \
 "	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];\n" \
 "	__local int_64 cl[CARRY_WG_SZ];\n" \
-"	uint_32 r[CARRY_LENGTH];\n" \
+"	int_32 r[CARRY_LENGTH];\n" \
 "\n" \
 "	carry_mul_sub_1(xi, NULL_PTR, carry, cl, r, id, a);\n" \
 "	barrier(CLK_LOCAL_MEM_FENCE);\n" \
@@ -1128,7 +1147,7 @@ static const char * const src_ocl_kernel = \
 "	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];\n" \
 "	__global const ZP * restrict const yi = &reg[reg_y * N_SZ + CARRY_LENGTH * id];\n" \
 "	__local int_64 cl[CARRY_WG_SZ];\n" \
-"	uint_32 r[CARRY_LENGTH];\n" \
+"	int_32 r[CARRY_LENGTH];\n" \
 "\n" \
 "	carry_mul_sub_1(xi, yi, carry, cl, r, id, 1);\n" \
 "	barrier(CLK_LOCAL_MEM_FENCE);\n" \
@@ -1140,29 +1159,15 @@ static const char * const src_ocl_kernel = \
 "{\n" \
 "	const sz_t id = (sz_t)get_global_id(0);\n" \
 "	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * CARRY_WG_SZ * id];\n" \
-"	uint_32 r[CARRY_LENGTH];\n" \
+"	int_32 r[CARRY_LENGTH];\n" \
 "\n" \
 "	int_64 f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];\n" \
 "	if ((id == 0) && (is_nega != 0)) f = -f;\n" \
 "\n" \
 "	// assert CARRY_LENGTH = 4\n" \
-"	const ZP4 x1_4 = load4g(xi, 0);\n" \
-"	r[0] = x1_4.s0; r[1] = x1_4.s1; r[2] = x1_4.s2; r[3] = x1_4.s3;\n" \
-"\n" \
-"	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
-"	{\n" \
-"		f += (int_64)(r[j]);\n" \
-"		r[j] = (uint_32)(f) & (BASE - 1);\n" \
-"		f >>= LBASE;\n" \
-"	}\n" \
-"	f += (int_64)(r[CARRY_LENGTH - 1]);\n" \
-"\n" \
-"	// assert CARRY_LENGTH = 4\n" \
-"	ZP4 x_4; x_4.s0 = r[0]; x_4.s1 = r[1]; x_4.s2 = r[2];\n" \
-"	x_4.s3 = set_int((int_32)f, P1);\n" \
-"	store4g(xi, 0, x_4);\n" \
-"	x_4.s3 = set_int((int_32)f, P2);\n" \
-"	store4g(xi, Z_OFFSET / 4, x_4);\n" \
+"	read4(r, xi);	\n" \
+"	set_carry(r, f);\n" \
+"	store4(xi, r);\n" \
 "}\n" \
 "\n" \
 "// --- strict modulo ---\n" \
@@ -1172,21 +1177,15 @@ static const char * const src_ocl_kernel = \
 "	x[0] = set_int(i, P1); x[0 + Z_OFFSET] = set_int(i, P2);\n" \
 "}\n" \
 "\n" \
-"// b-1, b-1, ..., b-1, b + a, ... => b, 0, ..., 0, a, ...\n" \
-"INLINE void fix_base(__global ZP * restrict const x)\n" \
+"INLINE void lower(__global ZP * restrict const x, const int_32 l0)\n" \
 "{\n" \
-"	if (x[N_SZ - 1] == BASE - 1)\n" \
+"	int_32 hi = get_int(x[N_SZ - 1], P1);\n" \
+"	if (hi >= (int_32)(BASE))	// >= base^n\n" \
 "	{\n" \
-"		sz_t i = 2; for (; i < N_SZ; ++i) { if (x[N_SZ - i] != BASE - 1) break; }\n" \
-"		if (get_int(x[N_SZ - i], P1) >= (int_32)(BASE))\n" \
-"		{\n" \
-"			x[N_SZ - i] -= BASE; x[N_SZ - i + Z_OFFSET] -= BASE;\n" \
-"			for (sz_t j = i - 1; j >= 2; --j)\n" \
-"			{\n" \
-"				x[N_SZ - j] = 0; x[N_SZ - j + Z_OFFSET] = 0;\n" \
-"			}\n" \
-"			x[N_SZ - 1] = BASE; x[N_SZ - 1 + Z_OFFSET] = BASE;\n" \
-"		}\n" \
+"		int_32 lo = get_int(x[0], P1);\n" \
+"		hi -= (int_32)(BASE); lo -= l0;	// - R or Q\n" \
+"		set_rns(&x[N_SZ - 1], hi);\n" \
+"		set_rns(&x[0], lo);\n" \
 "	}\n" \
 "}\n" \
 "\n" \
@@ -1195,23 +1194,7 @@ static const char * const src_ocl_kernel = \
 "{\n" \
 "	__global ZP * restrict const x = &reg[reg_x * N_SZ];\n" \
 "\n" \
-"	fix_base(x);\n" \
-"\n" \
-"	int_32 hi = get_int(x[N_SZ - 1], P1);\n" \
-"	if (hi < 0)\n" \
-"	{\n" \
-"		int_32 lo = get_int(x[0], P1);\n" \
-"		hi += (int_32)(BASE); lo += 1;	// + Q\n" \
-"		set_rns(&x[N_SZ - 1], hi);\n" \
-"		set_rns(&x[0], lo);\n" \
-"	}\n" \
-"	else if (hi >= (int_32)(BASE))\n" \
-"	{\n" \
-"		int_32 lo = get_int(x[0], P1);\n" \
-"		hi -= (int_32)(BASE); lo -= 1;	// - Q\n" \
-"		set_rns(&x[N_SZ - 1], hi);\n" \
-"		set_rns(&x[0], lo);\n" \
-"	}\n" \
+"	lower(x, 1);	// < Q - 1\n" \
 "}\n" \
 "\n" \
 "__kernel\n" \
@@ -1219,20 +1202,9 @@ static const char * const src_ocl_kernel = \
 "{\n" \
 "	__global ZP * restrict const x = &reg[reg_x * N_SZ];\n" \
 "\n" \
-"	fix_base(x);\n" \
+"	lower(x, -1);		// <= R\n" \
 "\n" \
-"	int_32 hi = get_int(x[N_SZ - 1], P1), lo = get_int(x[0], P1);\n" \
-"	if (hi < 0)\n" \
-"	{\n" \
-"		int_32 lo = get_int(x[0], P1);\n" \
-"		hi += (int_32)(BASE); lo -= 1;	// + R\n" \
-"		set_rns(&x[N_SZ - 1], hi);\n" \
-"	}\n" \
-"	else if (hi >= (int_32)(BASE))\n" \
-"	{\n" \
-"		hi -= (int_32)(BASE); lo += 1;	// - R\n" \
-"		set_rns(&x[N_SZ - 1], hi);\n" \
-"	}\n" \
+"	const int_32 lo = get_int(x[0], P1);\n" \
 "	set_rns(&x[0], lo + 2);\n" \
 "}\n" \
 "\n" \
