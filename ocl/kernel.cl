@@ -1090,9 +1090,9 @@ INLINE void carry_2(__global ZP * restrict const xi, const __local int_64 * cons
 
 	// assert CARRY_LENGTH = 4
 	ZP4 x_4; x_4.s0 = r[0]; x_4.s1 = r[1]; x_4.s2 = r[2];
-	x_4.s3 = set_int((int_32)f, P1);
+	x_4.s3 = set_int((int_32)(f), P1);
 	store4g(xi, 0, x_4);
-	x_4.s3 = set_int((int_32)f, P2);
+	x_4.s3 = set_int((int_32)(f), P2);
 	store4g(xi, Z_OFFSET / 4, x_4);
 }
 
@@ -1147,9 +1147,9 @@ void carry_complete(__global ZP * restrict const reg, __global const int_64 * re
 
 	// assert CARRY_LENGTH = 4
 	ZP4 x_4; x_4.s0 = r[0]; x_4.s1 = r[1]; x_4.s2 = r[2];
-	x_4.s3 = set_int((int_32)f, P1);
+	x_4.s3 = set_int((int_32)(f), P1);
 	store4g(xi, 0, x_4);
-	x_4.s3 = set_int((int_32)f, P2);
+	x_4.s3 = set_int((int_32)(f), P2);
 	store4g(xi, Z_OFFSET / 4, x_4);
 }
 
@@ -1212,7 +1212,6 @@ void mod_R_add2(__global ZP * restrict const reg, const uint_32 reg_x)
 	int_32 hi = get_int(x[N_SZ - 1], P1), lo = get_int(x[0], P1);
 	if (hi < 0)
 	{
-		int_32 lo = get_int(x[0], P1);
 		hi += (int_32)(BASE); lo -= 1;	// + R
 		set_rns(&x[N_SZ - 1], hi);
 	}
