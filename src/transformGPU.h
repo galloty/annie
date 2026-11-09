@@ -151,20 +151,30 @@ private:
 	std::string _hinfo;
 
 private:
+	static mp_limb_t read_word(const mpz_t & x, const size_t bit_index)
+	{
+		const size_t limb_index = bit_index / 64;
+		const int limb_shift = int(bit_index % 64);
+		const mp_limb_t rl = mpz_getlimbn(x, limb_index), rh = mpz_getlimbn(x, limb_index + 1);
+		mp_limb_t r = rl >> limb_shift;
+		if (limb_shift != 0) r |= rh << (64 - limb_shift);
+		return r;
+	}
+
 	void set_mpz(const size_t reg_y, const mpz_t & x)
 	{
 		const size_t n = size_t(1) << _ln;
-		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
+		const int lbase = _lbase;
+		const uint32 base = 1u << lbase;
 		ZP * const buf = _buf;
 
-		mpz_t s, r; mpz_init_set(s, x); mpz_init(r);
+		size_t bit_index = 0;
 		for (size_t i = 0; i < n; ++i)
 		{
-			mpz_mod_2exp(r, s, lbase);
-			buf[i] = ZP(uint32(mpz_get_ui(r)));
-			mpz_div_2exp(s, s, lbase);
+			const uint32 r = read_word(x, bit_index);
+			buf[i] = ZP(uint32(r) & (base - 1));
+			bit_index += size_t(lbase);
 		}
-		mpz_clears(s, r, nullptr);
 
 		engine * const eng = _engine;
 		eng->write_memory(reg_y, buf);
