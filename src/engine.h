@@ -69,6 +69,8 @@ private:
 
 	std::vector<cl_kernel> _kernels;
 
+	size_t _data_size, _cache_size;
+
 	static constexpr int ilog2_32(const uint32_t n) { return (n == 0) ? -1 : (31 - __builtin_clz(n)); }
 
 public:
@@ -78,6 +80,9 @@ public:
 
 	int get_carry_shift() const { return _carry_shift; }
 	size_t get_carry_workgroup_size() const { return (size_t(1) << _carry_shift); }
+
+	size_t get_data_size() const { return _data_size; }
+	size_t get_cache_size() const { return _cache_size; }
 
 ///////////////////////////////
 
@@ -91,14 +96,18 @@ public:
 		if (_ln != 0)
 		{
 			const size_t size = 2 * n * sizeof(ZP);
-			const size_t mem_size = reg_count * size;
-			if (getMaxMemAllocSize() < mem_size)
+			const size_t reg_size = reg_count * size;
+			const size_t carry_size = n / CARRY_LENGTH * sizeof(int64);
+			if (getMaxMemAllocSize() < reg_size)
 			{
-				std::cerr << "Warning: trying to allocate " << mem_size / (1u << 20)
+				std::cerr << "Warning: trying to allocate " << reg_size / (1u << 20)
 					<< " MB and the maximum OpenCL size is " << getMaxMemAllocSize() / (1u << 20) << " MB." << std::endl;
 			}
-			_reg = _createBuffer(CL_MEM_READ_WRITE, mem_size);
-			_carry = _createBuffer(CL_MEM_READ_WRITE, n / CARRY_LENGTH * sizeof(int64));
+			_reg = _createBuffer(CL_MEM_READ_WRITE, reg_size);
+			_carry = _createBuffer(CL_MEM_READ_WRITE, carry_size);
+
+			_data_size = reg_size + carry_size;
+			_cache_size = _data_size - 2 * size;	// - Reg2 & Reg_one
 		}
 	}
 

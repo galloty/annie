@@ -57,21 +57,6 @@ public:
 		_quit.store(true, std::memory_order_relaxed);
 	}
 
-private:
-	// void display_info(const bool full) const
-	// {
-		// std::ostringstream ss; ss << "Using " << _transform->get_type() << " implementation";
-		// if (!_transform->get_gpu_type().empty()) ss << "." << std::endl << "Running on " << _transform->get_gpu_type();
-		// else if (VSIZE / 8 > 1) ss << ", " << (VSIZE / 8) << " threads";
-		// if (full)
-		// {
-		// 	ss << ", data size: " << std::lrint(_transform->get_data_size() / (1024 * 1024.0)) << " MB";
-		// 	ss << ", cache size: " << std::setprecision(3) << _transform->get_cache_size() / (1024 * 1024.0) << " MB";
-		// }
-		// ss << "." << std::endl;
-		// pio::print(ss.str());
-	// }
-
 	static std::string uint64_to_string(const uint64_t u)
 	{
 		std::stringstream ss; ss << std::uppercase << std::hex << std::setfill('0') << std::setw(16) << u;
@@ -213,7 +198,8 @@ private:
 		std::ofstream res_file("results.txt", std::ofstream::app); 
 		res_file << str;
 		res_file.close();
-		print(str);
+		std::ostringstream ss; ss << str << std::endl;
+		print(ss.str());
 	}
 
 public:

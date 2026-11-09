@@ -148,6 +148,7 @@ private:
 	mpz_t _Nz;
 	engine * _engine = nullptr;
 	ZP * _buf = nullptr;
+	std::string _hinfo;
 
 private:
 	void set_mpz(const size_t reg_y, const mpz_t & x)
@@ -475,6 +476,14 @@ public:
 		set_mpz(Reg_one, t);
 
 		mpz_clears(R, t, nullptr);
+
+		const size_t data_size = eng->get_data_size(), cache_size = eng->get_cache_size();
+		std::ostringstream ssi;
+		ssi << eng->getType() << std::endl << "data size: ";
+		if (data_size < (10u << 20)) ssi << data_size / (1u << 10) << " KB"; else ssi << data_size / (1u << 20) << " MB";
+		ssi << ", cache size: ";
+		if (cache_size < (10u << 20)) ssi << cache_size / (1u << 10) << " KB"; else ssi << cache_size / (1u << 20) << " MB";
+		_hinfo = ssi.str();
 	}
 
 	virtual ~transformGPU()
@@ -493,7 +502,9 @@ public:
 	std::string get_info() const override
 	{
 		const size_t n = size_t(1) << _ln;
-		std::ostringstream ss; ss << "Montgomery-McLaughlin-Gallot-Woltman reduction of length " << n << "x" << _lbase << " bits" << std::endl;
+		std::ostringstream ss;
+		ss << "Montgomery-McLaughlin-Gallot-Woltman reduction of length " << n << "x" << _lbase << " bits" << std::endl;
+		ss << _hinfo << "." << std::endl;
 		return (ss.str());
 	}
 };
