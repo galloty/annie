@@ -200,6 +200,22 @@ private:
 		std::remove(std::string(checkpoint_file + ".old").c_str());
 	}
 
+	static void print(const std::string & str)
+	{
+		std::ofstream log_file("annie.log", std::ofstream::app); 
+		log_file << str;
+		log_file.close();
+		std::cout << str;
+	}
+
+	static void result(const std::string & str)
+	{
+		std::ofstream res_file("results.txt", std::ofstream::app); 
+		res_file << str;
+		res_file.close();
+		print(str);
+	}
+
 public:
 	EReturn check(const mpz_t & n, const std::string & expression, const size_t device, const bool verbose = true)
 	{
@@ -212,24 +228,37 @@ public:
 			if (r != 0)
 			{
 				const char * const prp = (r == 1) ? "a probable " : "";
-				std::cout << ns << " is " << prp << "prime." << std::endl;
+				std::ostringstream ss; ss << ns << " is " << prp << "prime." << std::endl;
+				result(ss.str());
 			}
-			else if (verbose) std::cout << ns << " is composite." << std::endl;
+			else if (verbose)
+			{
+				std::ostringstream ss; ss << ns << " is composite." << std::endl;
+				result(ss.str());
+			}
 			return EReturn::Success;
 		}
 
 		if (mpz_even_p(n) != 0)
 		{
-			if (verbose) std::cout << ns << " is even." << std::endl;
+			if (verbose)
+			{
+				std::ostringstream ss; ss << ns << " is even." << std::endl;
+				result(ss.str());
+			}
 			return EReturn::Success;
 		}
 
 		int32_t a = 2;
 		while (mpz_si_kronecker(a, n) != -1) { ++a; const int32_t s = std::lround(std::sqrt(double(a))); if (s * s == a) ++a; }
 
-		if (verbose) std::cout << "Running Euler probable primality test of " << ns << " to base " << a << " [" << nsize << " digits]" << std::endl;
+		if (verbose)
+		{
+			std::ostringstream ss; ss << "Running Euler probable primality test of " << ns << " to base " << a << " [" << nsize << " digits]" << std::endl;
+			print(ss.str());
+		}
 
-		transform * const p_transform = (nsize < 80) ? (transform *)(new transformGMP(n, a, verbose)) : (transform *)(new transformGPU(n, a, device, verbose));
+		transform * const p_transform = (nsize < 80) ? (transform *)(new transformGMP(n, a)) : (transform *)(new transformGPU(n, a, device));
 		if (p_transform->init_failed())
 		{
 			if (verbose)
@@ -239,11 +268,13 @@ public:
 				std::string str; str.resize(mpz_sizeinbase(f, 10) + 64);
 				mpz_get_str(str.data(), 10, f);
 				mpz_clear(f);
-				std::cout << str << " divides " << ns << "." << std::endl;
+				std::ostringstream ss; ss << str << " divides " << ns << "." << std::endl;
+				result(ss.str());
 			}
 			delete _transform;
 			return EReturn::Success;
 		}
+		if (verbose) print(p_transform->get_info());
 
 		_transform = p_transform;
 
@@ -265,7 +296,11 @@ public:
 			p_transform->set1();
 			p_transform->copy(transform::Reg1, transform::Reg0);	// d(t)
 		}
-		else std::cout << "Resuming from a checkpoint." << std::endl;
+		else
+		{
+			std::ostringstream ss; ss << "Resuming from a checkpoint." << std::endl;
+			print(ss.str());
+		}
 
 		watch chrono(found ? restored_time : 0);
 		const int i0 = int(mpz_sizeinbase(exponent, 2)) - 1;
@@ -363,12 +398,15 @@ public:
 		{
 			if (is_prp)
 			{
-				std::cout << ns << " is a probable prime, a = " << a << ", time = " << timer::format_time(elapsed_time) << "." << std::endl;
+				std::ostringstream ss; ss << ns << " is a probable prime, a = " << a
+					<< ", time = " << timer::format_time(elapsed_time) << "." << std::endl;
+				result(ss.str());
 			}
 			else if (verbose)
 			{
-				std::cout << ns << " is composite, res64 = " << uint64_to_string(res64) << ", a = " << a
+				std::ostringstream ss; ss << ns << " is composite, res64 = " << uint64_to_string(res64) << ", a = " << a
 					<< ", time = " << timer::format_time(elapsed_time) << "." << std::endl;
+				result(ss.str());
 			}
 		}
 

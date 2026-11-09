@@ -167,7 +167,7 @@ public:
 	void save_checkpoint(file &) const override {}
 
 public:
-	transformGMP(const mpz_t & N, const int32_t a, const bool verbose) : transform()
+	transformGMP(const mpz_t & N, const int32_t a) : transform()
 	{
 		mpz_init_set(_N, N); mpz_inits(_Ninv, _R, _Q, _one, _t_Q, _t, nullptr);
 		for (size_t i = 0; i < reg_count; ++i) mpz_init(_reg[i]);
@@ -187,8 +187,6 @@ public:
 		mpz_set(_one, _R); mpz_mod(_one, _one, _N);
 		if (mpz_odd_p(_one) != 0) mpz_add(_one, _one, _N);
 		mpz_div_2exp(_one, _one, 1);
-
-		if (verbose) std::cout << "Montgomery-McLaughlin-Gallot-Woltman reduction of length " << _n << " bits" << std::endl;
 	}
 
 	virtual ~transformGMP()
@@ -198,5 +196,11 @@ public:
 #endif
 		mpz_clears(_N, _Ninv, _R, _Q, _one, _t_Q, _t, nullptr);
 		for (size_t i = 0; i < reg_count; ++i) mpz_clear(_reg[i]);
+	}
+
+	std::string get_info() const override
+	{
+		std::ostringstream ss; ss << "Montgomery-McLaughlin-Gallot-Woltman reduction of length " << _n << " bits" << std::endl;
+		return (ss.str());
 	}
 };

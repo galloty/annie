@@ -36,4 +36,6 @@ public:
 public:
 	transform() {}
 	virtual ~transform() {}
+
+	virtual std::string get_info() const = 0;
 };

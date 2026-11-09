@@ -861,7 +861,7 @@ public:
 	}
 
 public:
-	transformCPU(const mpz_t & N, const int32_t a, const bool verbose) : transform()
+	transformCPU(const mpz_t & N, const int32_t a) : transform()
 	{
 		mpz_t R, t; mpz_inits(_Nz, R, t, nullptr);
 
@@ -930,8 +930,6 @@ public:
 		set_mpz(_one, t);
 
 		mpz_clears(R, t, nullptr);
-
-		if (verbose) std::cout << "Montgomery-McLaughlin-Gallot-Woltman reduction of length " << n << "x" << lbase << " bits" << std::endl;
 	}
 
 	virtual ~transformCPU()
@@ -950,5 +948,12 @@ public:
 		delete[] _w_Q; delete[] _wi_Q;
 
 		delete[] _carry;
+	}
+
+	std::string get_info() const override
+	{
+		const size_t n = size_t(1) << _ln;
+		std::ostringstream ss; ss << "Montgomery-McLaughlin-Gallot-Woltman reduction of length " << n << "x" << _lbase << " bits" << std::endl;
+		return (ss.str());
 	}
 };

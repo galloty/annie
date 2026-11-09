@@ -368,7 +368,7 @@ public:
 	}
 
 public:
-	transformGPU(const mpz_t & N, const int32_t a, const size_t device_id, const bool verbose) : transform()
+	transformGPU(const mpz_t & N, const int32_t a, const size_t device_id) : transform()
 	{
 		mpz_t R, t; mpz_inits(_Nz, R, t, nullptr);
 
@@ -391,6 +391,7 @@ public:
 			}
 		}
 
+		if (ln > 23) throw std::runtime_error("NTT size > 2^23 is not supported");
 		const size_t n = size_t(1) << ln;
 		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
 
@@ -474,8 +475,6 @@ public:
 		set_mpz(Reg_one, t);
 
 		mpz_clears(R, t, nullptr);
-
-		if (verbose) std::cout << "Montgomery-McLaughlin-Gallot-Woltman reduction of length " << n << "x" << lbase << " bits" << std::endl;
 	}
 
 	virtual ~transformGPU()
@@ -489,5 +488,12 @@ public:
 		delete eng;
 
 		delete[] _buf;
+	}
+
+	std::string get_info() const override
+	{
+		const size_t n = size_t(1) << _ln;
+		std::ostringstream ss; ss << "Montgomery-McLaughlin-Gallot-Woltman reduction of length " << n << "x" << _lbase << " bits" << std::endl;
+		return (ss.str());
 	}
 };
