@@ -369,6 +369,28 @@ public:
 	}
 
 public:
+	std::string get_type() const { return _engine->getType(); }
+	std::string get_data_size() const
+	{
+		const size_t data_size = _engine->get_data_size();
+		std::ostringstream ss; ss << "data size: ";
+		if (data_size < (10u << 20)) ss << data_size / (1u << 10) << " KB"; else ss << data_size / (1u << 20) << " MB";
+		return ss.str();
+	}
+	std::string get_cache_size() const
+	{
+		const size_t cache_size = _engine->get_cache_size();
+		std::ostringstream ss; ss << "cache size: ";
+		if (cache_size < (10u << 20)) ss << cache_size / (1u << 10) << " KB"; else ss << cache_size / (1u << 20) << " MB";
+		return ss.str();
+	}
+	std::string get_info_short() const
+	{
+		const size_t n = size_t(1) << _ln;
+		std::ostringstream ss; ss << "length " << n << "x" << _lbase << " bits";
+		return (ss.str());
+	}
+
 	transformGPU(const mpz_t & N, const int32_t a, const size_t device_id) : transform()
 	{
 		mpz_t R, t; mpz_inits(_Nz, R, t, nullptr);
@@ -477,12 +499,7 @@ public:
 
 		mpz_clears(R, t, nullptr);
 
-		const size_t data_size = eng->get_data_size(), cache_size = eng->get_cache_size();
-		std::ostringstream ssi;
-		ssi << eng->getType() << std::endl << "data size: ";
-		if (data_size < (10u << 20)) ssi << data_size / (1u << 10) << " KB"; else ssi << data_size / (1u << 20) << " MB";
-		ssi << ", cache size: ";
-		if (cache_size < (10u << 20)) ssi << cache_size / (1u << 10) << " KB"; else ssi << cache_size / (1u << 20) << " MB";
+		std::ostringstream ssi; ssi << get_type() << std::endl << get_data_size() << ", " << get_cache_size();
 		_hinfo = ssi.str();
 	}
 
@@ -501,10 +518,7 @@ public:
 
 	std::string get_info() const override
 	{
-		const size_t n = size_t(1) << _ln;
-		std::ostringstream ss;
-		ss << "Montgomery-McLaughlin-Gallot-Woltman reduction of length " << n << "x" << _lbase << " bits" << std::endl;
-		ss << _hinfo << "." << std::endl;
+		std::ostringstream ss; ss << "Montgomery-McLaughlin-Gallot-Woltman reduction of " << get_info_short() << std::endl << _hinfo << std::endl;
 		return (ss.str());
 	}
 };

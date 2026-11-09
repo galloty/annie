@@ -36,7 +36,7 @@ extern "C" {
 }
 #pragma GCC diagnostic pop
 
-#define	QUICK_TEST	true
+// #define	QUICK_TEST	true
 
 class application
 {
@@ -132,10 +132,11 @@ private:
 	static std::string usage()
 	{
 		std::ostringstream ss;
-		ss << "Usage: annie -q <expression> or -f <filename> [options]" << std::endl;
-		ss << "  -d <n>    set the OpenCL device number (default 0)" << std::endl << std::endl;
-		ss << " <expression> is a Pari/GP math expression. It must be an integer." << std::endl;
-		ss << " If the expression is too long, it can be written to the file <filename>." << std::endl;
+		ss << "Usage: annie [options]" << std::endl;
+		ss << "  -q \"expression\"     a Pari/GP math expression, it must be an integer" << std::endl;
+		ss << "  -f <filename>       a long expression can be written to the file <filename>" << std::endl;
+		ss << "  -d <n>              set the OpenCL device number (default 0)" << std::endl;
+		ss << "  -h                  validate and bench hardware" << std::endl;
 		ss << " annie checks if the integer n is an Euler probable prime to base a," << std::endl;
 		ss << " where a is the smallest integer such that the Jacobi symbol (a/n) = -1." << std::endl;
 		ss << " If n is a Proth number then the test is a primality proof (Proth's theorem)." << std::endl;
@@ -174,6 +175,7 @@ public:
 #else
 		std::string expression, filename;
 		size_t device = 0;
+		bool bench = false;
 
 		// parse args
 		for (size_t i = 0, size = args.size(); i < size; ++i)
@@ -182,19 +184,31 @@ public:
 
 			if (arg.substr(0, 2) == "-q")
 			{
-				if (!filename.empty()) throw std::runtime_error("-q used with an incompatible option (-f)");
+				if (!filename.empty() || bench) throw std::runtime_error("-q used with an incompatible option (-f, -h)");
 				expression = ((arg == "-q") && (i + 1 < size)) ? args[++i] : arg.substr(2);
 			}
 			if (arg.substr(0, 2) == "-f")
 			{
-				if (!expression.empty()) throw std::runtime_error("-f used with an incompatible option (-q)");
+				if (!expression.empty() || bench) throw std::runtime_error("-f used with an incompatible option (-q, -h)");
 				filename = ((arg == "-f") && (i + 1 < size)) ? args[++i] : arg.substr(2);
+			}
+			if (arg.substr(0, 2) == "-h")
+			{
+				if (!filename.empty() || !expression.empty()) throw std::runtime_error("-h used with an incompatible option (-q, -f)");
+				bench = true;
 			}
 			if (arg.substr(0, 2) == "-d")
 			{
 				const std::string dstr = ((arg == "-d") && (i + 1 < size)) ? args[++i] : arg.substr(2);
 				device = size_t(std::atoi(dstr.c_str()));
 			}
+		}
+
+		if (bench)
+		{
+			_instance = new annie();
+			_instance->bench(device);
+			return;
 		}
 
 		if (!filename.empty())

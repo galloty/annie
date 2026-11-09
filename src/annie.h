@@ -13,6 +13,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include <iomanip>
 #include <cmath>
 #include <atomic>
+#include <thread>
 
 #include <gmp.h>
 
@@ -398,5 +399,124 @@ public:
 
 		clear_checkpoints();
 		return success ? EReturn::Success : EReturn::Failed;
+	}
+
+	void bench(const size_t device)
+	{
+		mpz_t n, exponent, res, r1, r2; mpz_inits(n, exponent, res, r1, r2, nullptr);
+		mpz_ui_pow_ui(exponent, 6, 50);
+		const int B_GL = B_GerbiczLi(mpz_sizeinbase(exponent, 2));
+
+		mpz_t e, t; mpz_inits(e, t, nullptr);
+		mpz_set(e, exponent); mpz_set_ui(res, 0);
+		while (mpz_sgn(e) != 0)
+		{
+			mpz_mod_2exp(t, e, mp_bitcnt_t(B_GL));
+			mpz_add(res, res, t);
+			mpz_div_2exp(e, e, mp_bitcnt_t(B_GL));
+		}
+		mpz_clears(e, t, nullptr);
+
+		for (size_t j = 1000; j <= 1000000; j *= 2)
+		{
+			mpz_set_ui(n, 3); mpz_mul_2exp(n, n, mp_bitcnt_t(j + 1)); mpz_add_ui(n, n, 1);
+
+			transformGPU * const p_transform = new transformGPU(n, 3, device);
+
+			if (j == 1000) std::cout << p_transform->get_type() << std::endl << std::endl;
+
+			if (p_transform->init_failed())	// TODO
+			{
+				std::cout << j << " failed!" << std::endl;
+				exit(0);
+			}
+
+			std::cout << "3*2^" << j << " + 1, " << p_transform->get_info_short() << ", ";
+
+			_transform = (transform *)(p_transform);
+
+			p_transform->set1();
+			p_transform->copy(transform::Reg1, transform::Reg0);
+
+			for (int i = int(mpz_sizeinbase(exponent, 2)) - 1; i >= 0; --i)
+			{
+				p_transform->square_mul((mpz_tstbit(exponent, mp_bitcnt_t(i)) != 0) ? 3 : 1);
+
+				if ((i % B_GL == 0) && (i / B_GL != 0))
+				{
+					p_transform->mul(transform::Reg1, transform::Reg0);
+				}
+			}
+
+			p_transform->copy(transform::Reg2, transform::Reg0);
+			p_transform->mul(transform::Reg2, transform::Reg1);
+
+			p_transform->square_mul(1);
+
+			const int res_size = int(mpz_sizeinbase(res, 2));
+
+			p_transform->set1();
+			for (int i = res_size - 1; i >= B_GL; --i)
+			{
+				p_transform->square_mul((mpz_tstbit(res, mp_bitcnt_t(i)) != 0) ? 3 : 1);
+			}
+
+			p_transform->mul(transform::Reg0, transform::Reg1);
+
+			for (int i = B_GL - 1; i >= 0; --i)
+			{
+				p_transform->square_mul(((i < res_size) && (mpz_tstbit(res, mp_bitcnt_t(i)) != 0)) ? 3 : 1);
+			}
+
+			p_transform->get(r1, transform::Reg0);
+			p_transform->get(r2, transform::Reg2);
+
+			if (mpz_cmp(r1, r2) != 0)
+			{
+				std::cout << ": test failed!" << std::endl;
+				delete _transform;
+				break;
+			}
+	
+			static std::atomic_bool _break;
+
+			std::atomic_thread_fence(std::memory_order_release);
+			_break.store(false, std::memory_order_relaxed);
+
+			std::thread delay([=]()
+			{
+				std::atomic_thread_fence(std::memory_order_release);
+				std::this_thread::sleep_for(std::chrono::seconds(5));
+				_break.store(true, std::memory_order_relaxed);
+			}); delay.detach();
+
+			watch chrono(0);
+			size_t i = 1;
+			while (!_break.load(std::memory_order_relaxed))
+			{
+				p_transform->square_mul((i % 2 != 0) ? 3 : 1);
+				++i;
+				if (quitting())
+				{
+					std::cout << ": aborted." << std::endl;
+					break;
+				}
+			}
+			std::atomic_thread_fence(std::memory_order_acquire);
+
+			if (!quitting())
+			{
+				p_transform->copy(transform::Reg2, transform::Reg0);	// synchro
+
+				const double mul_time = chrono.get_elapsed_time() / i, estimated_time = mul_time * mpz_sizeinbase(n, 2);
+				std::cout << timer::format_time(estimated_time) << std::setprecision(3) << ", " << mul_time * 1e3 << " ms/bit, ";
+				std::cout << p_transform->get_cache_size() << ", " << p_transform->get_data_size() << "." << std::endl;
+			}
+
+			delete _transform;
+			if (quitting()) break;
+		}
+
+		mpz_clears(n, exponent, res, r1, r2, nullptr);
 	}
 };
