@@ -406,7 +406,6 @@ public:
 		mpz_t n, exponent, res, r1, r2; mpz_inits(n, exponent, res, r1, r2, nullptr);
 		mpz_ui_pow_ui(exponent, 6, 30);
 		const int B_GL = B_GerbiczLi(mpz_sizeinbase(exponent, 2));
-		std::cout << mpz_sizeinbase(exponent, 2) << ", " << B_GL << std::endl;
 
 		mpz_t e, t; mpz_inits(e, t, nullptr);
 		mpz_set(e, exponent); mpz_set_ui(res, 0);
