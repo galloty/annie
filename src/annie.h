@@ -245,7 +245,7 @@ public:
 			print(ss.str());
 		}
 
-		transform * const p_transform = (nsize < 80) ? (transform *)(new transformGMP(n, a)) : (transform *)(new transformGPU(n, a, device));
+		transform * const p_transform = (nsize < 10000) ? (transform *)(new transformGMP(n, a)) : (transform *)(new transformGPU(n, a, device));
 		if (p_transform->init_failed())
 		{
 			if (verbose)
@@ -404,8 +404,9 @@ public:
 	void bench(const size_t device)
 	{
 		mpz_t n, exponent, res, r1, r2; mpz_inits(n, exponent, res, r1, r2, nullptr);
-		mpz_ui_pow_ui(exponent, 6, 50);
+		mpz_ui_pow_ui(exponent, 6, 30);
 		const int B_GL = B_GerbiczLi(mpz_sizeinbase(exponent, 2));
+		std::cout << mpz_sizeinbase(exponent, 2) << ", " << B_GL << std::endl;
 
 		mpz_t e, t; mpz_inits(e, t, nullptr);
 		mpz_set(e, exponent); mpz_set_ui(res, 0);
@@ -417,7 +418,7 @@ public:
 		}
 		mpz_clears(e, t, nullptr);
 
-		for (size_t j = 1000; j <= 1000000; j *= 2)
+		for (size_t j = 50000; j <= 102400000; j *= 2)
 		{
 			mpz_set_ui(n, 3); mpz_mul_2exp(n, n, mp_bitcnt_t(j + 1)); mpz_add_ui(n, n, 1);
 
@@ -431,8 +432,8 @@ public:
 				exit(0);
 			}
 
-			std::cout << "3*2^" << j << " + 1, " << p_transform->get_info_short() << ", ";
-
+			std::cout << "3*2^" << j << " + 1, " << mpz_sizeinbase(n, 10) << "/" << digits(n) << " digits, " << p_transform->get_info_short() << ", ";
+;
 			_transform = (transform *)(p_transform);
 
 			p_transform->set1();
