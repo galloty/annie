@@ -245,7 +245,7 @@ public:
 			print(ss.str());
 		}
 
-		transform * const p_transform = (nsize < 10000) ? (transform *)(new transformGMP(n, a)) : (transform *)(new transformGPU(n, a, device));
+		transform * const p_transform = (nsize < 80) ? (transform *)(new transformGMP(n, a)) : (transform *)(new transformGPU(n, a, device));
 		if (p_transform->init_failed())
 		{
 			if (verbose)
@@ -404,7 +404,7 @@ public:
 	void bench(const size_t device)
 	{
 		mpz_t n, exponent, res, r1, r2; mpz_inits(n, exponent, res, r1, r2, nullptr);
-		mpz_ui_pow_ui(exponent, 6, 30);
+		mpz_ui_pow_ui(exponent, 6, 50);
 		const int B_GL = B_GerbiczLi(mpz_sizeinbase(exponent, 2));
 
 		mpz_t e, t; mpz_inits(e, t, nullptr);
@@ -417,22 +417,23 @@ public:
 		}
 		mpz_clears(e, t, nullptr);
 
-		for (size_t j = 50000; j <= 102400000; j *= 2)
+		static const std::array<mp_bitcnt_t, 13> e_n = { 33216, 83048, 166092, 332190, 664381, 1162672, 1660962, 3321924, 6643854, 16609638, 33219278, 66438557, 159200000 };
+
+		bool first = true;
+		for (const mp_bitcnt_t e : e_n)
 		{
-			mpz_set_ui(n, 3); mpz_mul_2exp(n, n, mp_bitcnt_t(j + 1)); mpz_add_ui(n, n, 1);
+			mpz_set_ui(n, 3); mpz_mul_2exp(n, n, e); mpz_add_ui(n, n, 1);
 
 			transformGPU * const p_transform = new transformGPU(n, 3, device);
 
-			if (j == 1000) std::cout << p_transform->get_type() << std::endl << std::endl;
-
-			if (p_transform->init_failed())	// TODO
+			if (first)
 			{
-				std::cout << j << " failed!" << std::endl;
-				exit(0);
+				std::cout << p_transform->get_type() << std::endl << std::endl;
+				first = false;
 			}
 
-			std::cout << "3*2^" << j << " + 1, " << mpz_sizeinbase(n, 10) << "/" << digits(n) << " digits, " << p_transform->get_info_short() << ", ";
-;
+			std::cout << "3*2^" << e << " + 1, " << mpz_sizeinbase(n, 10) << " digits, " << p_transform->get_info_short() << ", ";
+
 			_transform = (transform *)(p_transform);
 
 			p_transform->set1();
@@ -486,7 +487,7 @@ public:
 			std::thread delay([=]()
 			{
 				std::atomic_thread_fence(std::memory_order_release);
-				std::this_thread::sleep_for(std::chrono::seconds(5));
+				std::this_thread::sleep_for(std::chrono::seconds(10));
 				_break.store(true, std::memory_order_relaxed);
 			}); delay.detach();
 
