@@ -25,6 +25,8 @@ protected:
 public:
 	ZP() {}
 	explicit ZP(const uint32 n) : _n(n) {}
+
+	uint32 get() const { return _n; }
 };
 
 #define	CARRY_LENGTH	4u

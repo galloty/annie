@@ -15,16 +15,18 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include "engine.h"
 #include "ocl/kernel.h"
 
+#define finline	__attribute__((always_inline))
+
 // The prime finite field Z/PZ
 template<uint32 P, uint32 Q, uint32 MR, uint32 RSQ, uint32 MPR>
 class ZPT : public ZP
 {
 private:
-	static uint32 _add(const uint32 a, const uint32 b) { return a + b - ((a >= P - b) ? P : 0); }
-	static uint32 _sub(const uint32 a, const uint32 b) { return a - b + ((a < b) ? P : 0); }
+	finline static uint32 _add(const uint32 a, const uint32 b) { return a + b - ((a >= P - b) ? P : 0); }
+	finline static uint32 _sub(const uint32 a, const uint32 b) { return a - b + ((a < b) ? P : 0); }
 
 	// Montgomery multiplication: 2 mul + 2 mul_hi
-	static uint32 _mul(const uint32 a, const uint32 b)
+	finline static uint32 _mul(const uint32 a, const uint32 b)
 	{
 		const uint64 t = a * uint64(b);
 		const uint32 lo = uint32(t), hi = uint32(t >> 32);
@@ -69,7 +71,6 @@ public:
 	explicit ZPT(const ZP & n) : ZP(n) {}
 	explicit ZPT(const uint32 n) : ZP(n) {}
 
-	uint32 get() const { return _n; }
 	int32 get_int() const { return int32(_n - ((_n >= P / 2) ? P : 0)); }
 
 	static ZPT norm(const int ln) { return ZPT(P - ((P - 1) >> ln)); }
@@ -151,14 +152,27 @@ private:
 	std::string _hinfo;
 
 private:
-	static mp_limb_t read_word(const mpz_t & x, const size_t bit_index)
+	finline static constexpr mp_limb_t read_limb(const mp_limb_t * const x_ptr, const size_t x_size, const size_t i)
+	{
+		return (i < x_size) ? x_ptr[i] : 0;
+	}
+
+	finline static constexpr uint32 read_word(const mp_limb_t * const x_ptr, const size_t x_size, const size_t bit_index)
 	{
 		const size_t limb_index = bit_index / 64;
 		const int limb_shift = int(bit_index % 64);
-		const mp_limb_t rl = mpz_getlimbn(x, limb_index), rh = mpz_getlimbn(x, limb_index + 1);
+		const mp_limb_t rl = read_limb(x_ptr, x_size, limb_index), rh = read_limb(x_ptr, x_size, limb_index + 1);
 		mp_limb_t r = rl >> limb_shift;
 		if (limb_shift != 0) r |= rh << (64 - limb_shift);
-		return r;
+		return uint32(r);
+	}
+
+	finline static constexpr void write_word(mp_limb_t * const x_ptr, const size_t bit_index, const uint32 r)
+	{
+		const size_t limb_index = bit_index / 64;
+		const int limb_shift = int(bit_index % 64);
+		x_ptr[limb_index] |= mp_limb_t(r) << limb_shift;
+		if (limb_shift != 0) x_ptr[limb_index + 1] |= mp_limb_t(r) >> (64 - limb_shift);
 	}
 
 	void set_mpz(const size_t reg_y, const mpz_t & x)
@@ -168,11 +182,14 @@ private:
 		const uint32 base = 1u << lbase;
 		ZP * const buf = _buf;
 
+		const size_t x_size = mpz_size(x);
+		const mp_limb_t * const x_ptr = mpz_limbs_read(x);
+
 		size_t bit_index = 0;
 		for (size_t i = 0; i < n; ++i)
 		{
-			const uint32 r = read_word(x, bit_index);
-			buf[i] = ZP(uint32(r) & (base - 1));
+			const uint32 r = read_word(x_ptr, x_size, bit_index);
+			buf[i] = ZP(r & (base - 1));
 			bit_index += size_t(lbase);
 		}
 
@@ -183,23 +200,45 @@ private:
 
 	void get_mpz(mpz_t & y, const size_t reg_x)
 	{
-		const size_t n = size_t(1) << _ln;
-		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
+		const int ln = _ln;
+		const size_t n = size_t(1) << ln;
+		const int lbase = int(_lbase);
+		const uint32 base = 1u << lbase;
 		ZP * const buf = _buf;
 
 		_engine->read_memory(reg_x, buf);
 
-		mpz_set_ui(y, 0);
-		for (size_t i = n; i > 0; --i)
+		const size_t y_size = (size_t(lbase) << ln) / 64 + 2;
+		mp_limb_t * const y_ptr = mpz_limbs_write(y, y_size);
+		for (size_t i = 0; i < y_size; ++i) y_ptr[i] = 0;
+
+
+		int64 f = 0;
+		size_t bit_index = 0;
+		for (size_t i = 0; i < n; ++i)
 		{
-			mpz_mul_2exp(y, y, lbase);
-			const int32 u = ZP1(buf[i - 1]).get_int();
-			if (u > 0) mpz_add_ui(y, y, (unsigned long int)(u));
-			else if (u < 0) mpz_sub_ui(y, y, (unsigned long int)(-u));
+			f += ZP1(buf[i]).get_int();
+			const uint32 r = uint32_t(f) & (base - 1);
+			f >>= lbase;
+
+			write_word(y_ptr, bit_index, r);
+			bit_index += size_t(lbase);
+		}
+
+		mp_size_t s = mp_size_t(y_size);
+		while ((s > 0) && (y_ptr[s - 1] == 0)) --s;
+ 		mpz_limbs_finish(y, s);
+
+		if (f != 0)
+		{
+			mpz_t t; mpz_init_set_si(t, long(f));
+			mpz_mul_2exp(t, t, mp_bitcnt_t(lbase) << ln);
+			mpz_add(y, y, t);
+			mpz_clear(t);
 		}
 	}
 
-	void NTT_forward8(const size_t reg_x, const size_t reg_w)
+	finline void NTT_forward8(const size_t reg_x, const size_t reg_w)
 	{
 		const int ln = _ln;
 		engine * const eng = _engine;
@@ -211,7 +250,7 @@ private:
 		if (ln >= 21) eng->forward8(reg_x, reg_w, ln - 3 - 9, 512);
 	}
 
-	void NTT_inverse8(const size_t reg_x, const size_t reg_w)
+	finline void NTT_inverse8(const size_t reg_x, const size_t reg_w)
 	{
 		const int ln = _ln;
 		engine * const eng = _engine;
@@ -223,50 +262,50 @@ private:
 		else eng->backward512_0(reg_x, reg_w);
 	}
 
-	void NTT_forward(const size_t reg_x, const size_t reg_w)
+	finline void NTT_forward(const size_t reg_x, const size_t reg_w)
 	{
 		NTT_forward8(reg_x, reg_w);
 		_engine->fwd(reg_x, reg_w);
 	}
 
-	void square(const size_t reg_x, const size_t reg_w)
+	finline void square(const size_t reg_x, const size_t reg_w)
 	{
 		NTT_forward8(reg_x, reg_w);
 		_engine->square(reg_x, reg_w);
 		NTT_inverse8(reg_x, reg_w);
 	}
 
-	void mul_const(const size_t reg_y, const size_t reg_x, const size_t reg_w)
+	finline void mul_const(const size_t reg_y, const size_t reg_x, const size_t reg_w)
 	{
 		NTT_forward8(reg_y, reg_w);
 		_engine->mul(reg_y, reg_x, reg_w);
 		NTT_inverse8(reg_y, reg_w);
 	}
 
-	void mul(const size_t reg_y, const size_t reg_x, const size_t reg_w)
+	finline void mul(const size_t reg_y, const size_t reg_x, const size_t reg_w)
 	{
 		NTT_forward(reg_x, reg_w);
 		mul_const(reg_y, reg_x, reg_w);
 	}
 
-	void carry_mul(const size_t reg_x, const int32 a, const bool nega)
+	finline void carry_mul(const size_t reg_x, const int32 a, const bool nega)
 	{
 		engine * const eng = _engine;
 		eng->carry_mul(reg_x, a);
 		eng->carry_complete(reg_x, nega);
 	}
 
-	void carry_sub(const size_t reg_x, const size_t reg_y, const bool nega)
+	finline void carry_sub(const size_t reg_x, const size_t reg_y, const bool nega)
 	{
 		engine * const eng = _engine;
 		eng->carry_sub(reg_x, reg_y);
 		eng->carry_complete(reg_x, nega);
 	}
 
-	void mod_Q(const size_t reg_x) { _engine->mod_Q(reg_x); }
-	void mod_R_add2(const size_t reg_x) { _engine->mod_R_add2(reg_x); }
+	finline void mod_Q(const size_t reg_x) { _engine->mod_Q(reg_x); }
+	finline void mod_R_add2(const size_t reg_x) { _engine->mod_R_add2(reg_x); }
 
-	void set(const size_t reg_y, const size_t reg_x) { _engine->set(reg_y, reg_x); }
+	finline void set(const size_t reg_y, const size_t reg_x) { _engine->set(reg_y, reg_x); }
 
 	// Montgomery-McLaughlin-Gallot-Woltman multiplication
 
