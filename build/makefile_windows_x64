@@ -1,4 +1,5 @@
 CC = g++ -std=c++17
+# CC = clang++ -std=c++17
 
 ROOT_DIR = ..
 

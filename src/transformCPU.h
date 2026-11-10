@@ -828,7 +828,7 @@ public:
 	bool init_failed() const override { return _init_failed; }
 	void get_factor(mpz_t & z) const override { mpz_set(z, _Nz); }
 
-	bool has_checkpoint() const { return true; }
+	bool has_checkpoint() const override { return true; }
 
 	bool read_checkpoint(file & cfile) override
 	{

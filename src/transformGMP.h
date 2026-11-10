@@ -162,7 +162,7 @@ public:
 	bool init_failed() const override { return _init_failed; }
 	void get_factor(mpz_t & z) const override { mpz_set(z, _Ninv); }
 
-	bool has_checkpoint() const { return false; }
+	bool has_checkpoint() const override { return false; }
 	bool read_checkpoint(file &) override { return false; }
 	void save_checkpoint(file &) const override {}
 
