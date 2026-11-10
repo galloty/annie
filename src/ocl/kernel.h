@@ -52,7 +52,7 @@ static const char * const src_ocl_kernel = \
 "#define BLK512			1\n" \
 "#define BLK1024			1\n" \
 "#define BLK2048			1\n" \
-"#define CHUNK64			32\n" \
+"#define CHUNK64			8\n" \
 "#define CHUNK512		4\n" \
 "#endif\n" \
 "#define BASE			(1u << LBASE)\n" \

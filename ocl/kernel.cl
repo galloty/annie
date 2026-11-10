@@ -40,7 +40,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define BLK512			1
 #define BLK1024			1
 #define BLK2048			1
-#define CHUNK64			32
+#define CHUNK64			8
 #define CHUNK512		4
 #endif
 #define BASE			(1u << LBASE)

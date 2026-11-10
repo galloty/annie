@@ -40,8 +40,8 @@ public:
 #define BLK1024		1	// local size = 1024 * BLK1024 * sizeof(ZP) = 4KB, workgroup size = 1024 / 8 * BLK1024 = 128
 #define BLK2048		1	// local size = 2048 * BLK2048 * sizeof(ZP) = 8KB, workgroup size = 2048 / 8 * BLK2048 = 256
 
-#define CHUNK64		32	// local size = 64 * CHUNK64 * sizeof(ZP) = 8KB, workgroup size = 64 / 8 * CHUNK64 = 256	// TODO bench
-#define CHUNK512	 4	// local size = 512 * CHUNK512 * sizeof(ZP) = 8KB, workgroup size = 512 / 8 * CHUNK512 = 256	// TODO bench
+#define CHUNK64		8	// local size = 64 * CHUNK64 * sizeof(ZP) = 2KB, workgroup size = 64 / 8 * CHUNK64 = 64
+#define CHUNK512	4	// local size = 512 * CHUNK512 * sizeof(ZP) = 8KB, workgroup size = 512 / 8 * CHUNK512 = 256
 
 #define CREATE_KERNEL(name) _##name = create_kernel(#name);
 #define CREATE_KERNEL_CARRY(name) _##name = create_kernel_carry(#name);
