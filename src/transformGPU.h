@@ -207,9 +207,8 @@ private:
 		_engine.read_memory(reg_x, buf);
 
 		const size_t y_size = (size_t(lbase) << LN) / 64 + 2;
-		mp_limb_t * const y_ptr = mpz_limbs_write(y, y_size);
+		mp_limb_t * const y_ptr = mpz_limbs_write(y, mp_size_t(y_size));
 		for (size_t i = 0; i < y_size; ++i) y_ptr[i] = 0;
-
 
 		int64 f = 0;
 		size_t bit_index = 0;

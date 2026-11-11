@@ -21,6 +21,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include <signal.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #endif
 
 #include <gmp.h>
