@@ -46,12 +46,10 @@ public:
 #define CREATE_KERNEL(name) _##name = create_kernel(#name);
 #define CREATE_KERNEL_CARRY(name) _##name = create_kernel_carry(#name);
 
+template<int LN>
 class engine : public device
 {
 private:
-	const int _ln;
-	const int _carry_shift;
-
 	cl_mem _reg, _carry;
 
 	cl_kernel _forward8 = nullptr, _backward8 = nullptr, _forward8_0 = nullptr, _backward8_0 = nullptr;
@@ -73,15 +71,15 @@ private:
 
 	size_t _data_size, _cache_size;
 
-	static constexpr int ilog2_32(const uint32_t n) { return (n == 0) ? -1 : (31 - __builtin_clz(n)); }
+	// _carry_shift[LN] = ilog2_32(uint32_t(std::min((size_t(1) << LN) / CARRY_LENGTH, size_t(256))))
+	static constexpr int _carry_shift[24] = { 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8 };
 
 public:
-	engine(const int ln, const size_t device_id) : device(platform(), device_id), _ln(ln),
-		_carry_shift(ilog2_32(uint32_t(std::min((size_t(1) << ln) / CARRY_LENGTH, std::min(size_t(256), getMaxWorkGroupSize()))))) {}
+	engine(const size_t device_id) : device(platform(), device_id) {}
 	virtual ~engine() {}
 
-	int get_carry_shift() const { return _carry_shift; }
-	size_t get_carry_workgroup_size() const { return (size_t(1) << _carry_shift); }
+	int get_carry_shift() const { return _carry_shift[LN]; }
+	size_t get_carry_workgroup_size() const { return (size_t(1) << _carry_shift[LN]); }
 
 	size_t get_data_size() const { return _data_size; }
 	size_t get_cache_size() const { return _cache_size; }
@@ -94,23 +92,20 @@ public:
 #if defined(ocl_debug)
 		std::cout << "Alloc gpu memory." << std::endl;
 #endif
-		const size_t n = size_t(1) << _ln;
-		if (_ln != 0)
+		const size_t n = size_t(1) << LN;
+		const size_t size = 2 * n * sizeof(ZP);
+		const size_t reg_size = reg_count * size;
+		const size_t carry_size = n / CARRY_LENGTH * sizeof(int64);
+		if (getMaxMemAllocSize() < reg_size)
 		{
-			const size_t size = 2 * n * sizeof(ZP);
-			const size_t reg_size = reg_count * size;
-			const size_t carry_size = n / CARRY_LENGTH * sizeof(int64);
-			if (getMaxMemAllocSize() < reg_size)
-			{
-				std::cerr << "Warning: trying to allocate " << reg_size / (1u << 20)
-					<< " MB and the maximum OpenCL size is " << getMaxMemAllocSize() / (1u << 20) << " MB." << std::endl;
-			}
-			_reg = _createBuffer(CL_MEM_READ_WRITE, reg_size);
-			_carry = _createBuffer(CL_MEM_READ_WRITE, carry_size);
-
-			_data_size = reg_size + carry_size;
-			_cache_size = _data_size - 2 * size;	// - Reg2 & Reg_one
+			std::cerr << "Warning: trying to allocate " << reg_size / (1u << 20)
+				<< " MB and the maximum OpenCL size is " << getMaxMemAllocSize() / (1u << 20) << " MB." << std::endl;
 		}
+		_reg = _createBuffer(CL_MEM_READ_WRITE, reg_size);
+		_carry = _createBuffer(CL_MEM_READ_WRITE, carry_size);
+
+		_data_size = reg_size + carry_size;
+		_cache_size = _data_size - 2 * size;	// - Reg2 & Reg_one
 	}
 
 	void release_memory()
@@ -118,11 +113,8 @@ public:
 #if defined(ocl_debug)
 		std::cout << "Free gpu memory." << std::endl;
 #endif
-		if (_ln != 0)
-		{
-			_releaseBuffer(_reg);
-			_releaseBuffer(_carry);
-		}
+		_releaseBuffer(_reg);
+		_releaseBuffer(_carry);
 	}
 
 ///////////////////////////////
@@ -149,88 +141,87 @@ public:
 #if defined(ocl_debug)
 		std::cout << "Create ocl kernels." << std::endl;
 #endif
-		const int ln = _ln;
-		if (ln >= 21)
+		if (LN >= 21)
 		{
 			CREATE_KERNEL(forward8);
 			CREATE_KERNEL(backward8);
 		}
-		if (ln <= 12)
+		if (LN <= 12)
 		{
 			CREATE_KERNEL(forward8_0);
 			CREATE_KERNEL(backward8_0);
 		}
-		if ((ln > 12) && (ln <= 16))
+		if ((LN > 12) && (LN <= 16))
 		{
 			CREATE_KERNEL(forward64_0);
 			CREATE_KERNEL(backward64_0);
 		}
-		if (ln > 16)
+		if (LN > 16)
 		{
 			CREATE_KERNEL(forward512_0);
 			CREATE_KERNEL(backward512_0);
 		}
 
-		if (ln == 4)
+		if (LN == 4)
 		{
 			CREATE_KERNEL(square2x4);
 			CREATE_KERNEL(mul2x4);
 		}
-		else if (ln == 5)
+		else if (LN == 5)
 		{
 			CREATE_KERNEL(square4x2);
 			CREATE_KERNEL(mul4x2);
 			CREATE_KERNEL(fwd4x2);
 		}
-		else if (ln == 6)
+		else if (LN == 6)
 		{
 			CREATE_KERNEL(square8);
 			CREATE_KERNEL(mul8);
 			CREATE_KERNEL(fwd8);
 		}
-		else if (ln == 7)
+		else if (LN == 7)
 		{
 			CREATE_KERNEL(square16);
 			CREATE_KERNEL(mul16);
 			CREATE_KERNEL(fwd16);
 		}
-		else if (ln == 8)
+		else if (LN == 8)
 		{
 			CREATE_KERNEL(square32);
 			CREATE_KERNEL(mul32);
 			CREATE_KERNEL(fwd32);
 		}
-		else if (ln == 9)
+		else if (LN == 9)
 		{
 			CREATE_KERNEL(square64);
 			CREATE_KERNEL(mul64);
 			CREATE_KERNEL(fwd64);
 		}
-		else if ((ln == 10) || (ln == 13))
+		else if ((LN == 10) || (LN == 13))
 		{
 			CREATE_KERNEL(square128);
 			CREATE_KERNEL(mul128);
 			CREATE_KERNEL(fwd128);
 		}
-		else if ((ln == 11) || (ln == 14) || (ln == 17))
+		else if ((LN == 11) || (LN == 14) || (LN == 17))
 		{
 			CREATE_KERNEL(square256);
 			CREATE_KERNEL(mul256);
 			CREATE_KERNEL(fwd256);
 		}
-		else if ((ln == 12) || (ln == 15) || (ln == 18) || (ln == 21))
+		else if ((LN == 12) || (LN == 15) || (LN == 18) || (LN == 21))
 		{
 			CREATE_KERNEL(square512);
 			CREATE_KERNEL(mul512);
 			CREATE_KERNEL(fwd512);
 		}
-		else if ((ln == 16) || (ln == 19) || (ln == 22))
+		else if ((LN == 16) || (LN == 19) || (LN == 22))
 		{
 			CREATE_KERNEL(square1024);
 			CREATE_KERNEL(mul1024);
 			CREATE_KERNEL(fwd1024);
 		}
-		else if ((ln == 20) || (ln == 23))
+		else if ((LN == 20) || (LN == 23))
 		{
 			CREATE_KERNEL(square2048);
 			CREATE_KERNEL(mul2048);
@@ -262,14 +253,14 @@ public:
 public:
 	void read_memory(const size_t reg_i, ZP * const ptr, const size_t count = 1)
 	{
-		const size_t n = size_t(1) << _ln;
+		const size_t n = size_t(1) << LN;
 		const size_t size = n * sizeof(ZP);
 		_readBuffer(_reg, ptr, count * size, reg_i * size);
 	}
 
 	void write_memory(const size_t reg_i, const ZP * const ptr, const size_t count = 1)
 	{
-		const size_t n = size_t(1) << _ln;
+		const size_t n = size_t(1) << LN;
 		const size_t size = n * sizeof(ZP);
 		_writeBuffer(_reg, ptr, count * size, reg_i * size);
 	}
@@ -282,7 +273,7 @@ private:
 		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
 		_setKernelArg(kernel, 1, sizeof(uint32), &rx);
 		_setKernelArg(kernel, 2, sizeof(uint32), &rw);
-		_executeKernel(kernel, 2u << (_ln - 3), wg_size);
+		_executeKernel(kernel, 2u << (LN - 3), wg_size);
 	}
 
 	void execute_kernel_fb(cl_kernel & kernel, const size_t reg_x, const size_t reg_w, const int lm, const size_t s, const size_t wg_size = 0)
@@ -313,51 +304,47 @@ public:
 
 	void square(const size_t reg_x, const size_t reg_w)
 	{
-		const int ln = _ln;
-		if      (ln == 4) execute_kernel(_square2x4, reg_x, reg_w);
-		else if (ln == 5) execute_kernel(_square4x2, reg_x, reg_w);
-		else if (ln == 6) execute_kernel(_square8, reg_x, reg_w);
-		else if (ln == 7) execute_kernel(_square16, reg_x, reg_w, 16 / 8 * BLK16);
-		else if (ln == 8) execute_kernel(_square32, reg_x, reg_w, 32 / 8 * BLK32);
-		else if (ln == 9) execute_kernel(_square64, reg_x, reg_w, 64 / 8 * BLK64);
-		else if ((ln == 10) || (ln == 13)) execute_kernel(_square128, reg_x, reg_w, 128 / 8 * BLK128);
-		else if ((ln == 11) || (ln == 14) || (ln == 17)) execute_kernel(_square256, reg_x, reg_w, 256 / 8 * BLK256);
-		else if ((ln == 12) || (ln == 15) || (ln == 18) || (ln == 21)) execute_kernel(_square512, reg_x, reg_w, 512 / 8 * BLK512);
-		else if ((ln == 16) || (ln == 19) || (ln == 22)) execute_kernel(_square1024, reg_x, reg_w, 1024 / 8 * BLK1024);
-		else if ((ln == 20) || (ln == 23)) execute_kernel(_square2048, reg_x, reg_w, 2048 / 8 * BLK2048);
+		if      (LN == 4) execute_kernel(_square2x4, reg_x, reg_w);
+		else if (LN == 5) execute_kernel(_square4x2, reg_x, reg_w);
+		else if (LN == 6) execute_kernel(_square8, reg_x, reg_w);
+		else if (LN == 7) execute_kernel(_square16, reg_x, reg_w, 16 / 8 * BLK16);
+		else if (LN == 8) execute_kernel(_square32, reg_x, reg_w, 32 / 8 * BLK32);
+		else if (LN == 9) execute_kernel(_square64, reg_x, reg_w, 64 / 8 * BLK64);
+		else if ((LN == 10) || (LN == 13)) execute_kernel(_square128, reg_x, reg_w, 128 / 8 * BLK128);
+		else if ((LN == 11) || (LN == 14) || (LN == 17)) execute_kernel(_square256, reg_x, reg_w, 256 / 8 * BLK256);
+		else if ((LN == 12) || (LN == 15) || (LN == 18) || (LN == 21)) execute_kernel(_square512, reg_x, reg_w, 512 / 8 * BLK512);
+		else if ((LN == 16) || (LN == 19) || (LN == 22)) execute_kernel(_square1024, reg_x, reg_w, 1024 / 8 * BLK1024);
+		else if ((LN == 20) || (LN == 23)) execute_kernel(_square2048, reg_x, reg_w, 2048 / 8 * BLK2048);
 	}
 
 	void mul(const size_t reg_x, const size_t reg_xp, const size_t reg_w)
 	{
-		const int ln = _ln;
-
-		if      (ln == 4) execute_kernel_mul(_mul2x4, reg_x, reg_xp, reg_w);
-		else if (ln == 5) execute_kernel_mul(_mul4x2, reg_x, reg_xp, reg_w);
-		else if (ln == 6) execute_kernel_mul(_mul8, reg_x, reg_xp, reg_w);
-		else if (ln == 7) execute_kernel_mul(_mul16, reg_x, reg_xp, reg_w, 16 / 8 * BLK16);
-		else if (ln == 8) execute_kernel_mul(_mul32, reg_x, reg_xp, reg_w, 32 / 8 * BLK32);
-		else if (ln == 9) execute_kernel_mul(_mul64, reg_x, reg_xp, reg_w, 64 / 8 * BLK64);
-		else if ((ln == 10) || (ln == 13)) execute_kernel_mul(_mul128, reg_x, reg_xp, reg_w, 128 / 8 * BLK128);
-		else if ((ln == 11) || (ln == 14) || (ln == 17)) execute_kernel_mul(_mul256, reg_x, reg_xp, reg_w, 256 / 8 * BLK256);
-		else if ((ln == 12) || (ln == 15) || (ln == 18) || (ln == 21)) execute_kernel_mul(_mul512, reg_x, reg_xp, reg_w, 512 / 8 * BLK512);
-		else if ((ln == 16) || (ln == 19) || (ln == 22)) execute_kernel_mul(_mul1024, reg_x, reg_xp, reg_w, 1024 / 8 * BLK1024);
-		else if ((ln == 20) || (ln == 23)) execute_kernel_mul(_mul2048, reg_x, reg_xp, reg_w, 2048 / 8 * BLK2048);
+		if      (LN == 4) execute_kernel_mul(_mul2x4, reg_x, reg_xp, reg_w);
+		else if (LN == 5) execute_kernel_mul(_mul4x2, reg_x, reg_xp, reg_w);
+		else if (LN == 6) execute_kernel_mul(_mul8, reg_x, reg_xp, reg_w);
+		else if (LN == 7) execute_kernel_mul(_mul16, reg_x, reg_xp, reg_w, 16 / 8 * BLK16);
+		else if (LN == 8) execute_kernel_mul(_mul32, reg_x, reg_xp, reg_w, 32 / 8 * BLK32);
+		else if (LN == 9) execute_kernel_mul(_mul64, reg_x, reg_xp, reg_w, 64 / 8 * BLK64);
+		else if ((LN == 10) || (LN == 13)) execute_kernel_mul(_mul128, reg_x, reg_xp, reg_w, 128 / 8 * BLK128);
+		else if ((LN == 11) || (LN == 14) || (LN == 17)) execute_kernel_mul(_mul256, reg_x, reg_xp, reg_w, 256 / 8 * BLK256);
+		else if ((LN == 12) || (LN == 15) || (LN == 18) || (LN == 21)) execute_kernel_mul(_mul512, reg_x, reg_xp, reg_w, 512 / 8 * BLK512);
+		else if ((LN == 16) || (LN == 19) || (LN == 22)) execute_kernel_mul(_mul1024, reg_x, reg_xp, reg_w, 1024 / 8 * BLK1024);
+		else if ((LN == 20) || (LN == 23)) execute_kernel_mul(_mul2048, reg_x, reg_xp, reg_w, 2048 / 8 * BLK2048);
 	}
 
 	void fwd(const size_t reg_x, const size_t reg_w)
 	{
-		const int ln = _ln;
-		if      (ln == 4) {} // 2x4
-		else if (ln == 5) execute_kernel(_fwd4x2, reg_x, reg_w);
-		else if (ln == 6) execute_kernel(_fwd8, reg_x, reg_w);
-		else if (ln == 7) execute_kernel(_fwd16, reg_x, reg_w);
-		else if (ln == 8) execute_kernel(_fwd32, reg_x, reg_w, 32 / 8 * BLK32);
-		else if (ln == 9) execute_kernel(_fwd64, reg_x, reg_w, 64 / 8 * BLK64);
-		else if ((ln == 10) || (ln == 13)) execute_kernel(_fwd128, reg_x, reg_w, 128 / 8 * BLK128);
-		else if ((ln == 11) || (ln == 14) || (ln == 17)) execute_kernel(_fwd256, reg_x, reg_w, 256 / 8 * BLK256);
-		else if ((ln == 12) || (ln == 15) || (ln == 18) || (ln == 21)) execute_kernel(_fwd512, reg_x, reg_w, 512 / 8 * BLK512);
-		else if ((ln == 16) || (ln == 19) || (ln == 22)) execute_kernel(_fwd1024, reg_x, reg_w, 1024 / 8 * BLK1024);
-		else if ((ln == 20) || (ln == 23)) execute_kernel(_fwd2048, reg_x, reg_w, 2048 / 8 * BLK2048);
+		if      (LN == 4) {} // 2x4
+		else if (LN == 5) execute_kernel(_fwd4x2, reg_x, reg_w);
+		else if (LN == 6) execute_kernel(_fwd8, reg_x, reg_w);
+		else if (LN == 7) execute_kernel(_fwd16, reg_x, reg_w);
+		else if (LN == 8) execute_kernel(_fwd32, reg_x, reg_w, 32 / 8 * BLK32);
+		else if (LN == 9) execute_kernel(_fwd64, reg_x, reg_w, 64 / 8 * BLK64);
+		else if ((LN == 10) || (LN == 13)) execute_kernel(_fwd128, reg_x, reg_w, 128 / 8 * BLK128);
+		else if ((LN == 11) || (LN == 14) || (LN == 17)) execute_kernel(_fwd256, reg_x, reg_w, 256 / 8 * BLK256);
+		else if ((LN == 12) || (LN == 15) || (LN == 18) || (LN == 21)) execute_kernel(_fwd512, reg_x, reg_w, 512 / 8 * BLK512);
+		else if ((LN == 16) || (LN == 19) || (LN == 22)) execute_kernel(_fwd1024, reg_x, reg_w, 1024 / 8 * BLK1024);
+		else if ((LN == 20) || (LN == 23)) execute_kernel(_fwd2048, reg_x, reg_w, 2048 / 8 * BLK2048);
 	}
 
 	void carry_mul(const size_t reg_x, const int32 a)
@@ -365,7 +352,7 @@ public:
 		const uint32 rx = uint32(reg_x);
 		_setKernelArg(_carry_mul, 2, sizeof(uint32), &rx);
 		_setKernelArg(_carry_mul, 3, sizeof(int32), &a);
-		_executeKernel(_carry_mul, (1u << _ln) / CARRY_LENGTH, 1u << _carry_shift);
+		_executeKernel(_carry_mul, (1u << LN) / CARRY_LENGTH, 1u << _carry_shift[LN]);
 	}
 
 	void carry_sub(const size_t reg_x, const size_t reg_y)
@@ -373,7 +360,7 @@ public:
 		const uint32 rx = uint32(reg_x), ry = uint32(reg_y);
 		_setKernelArg(_carry_sub, 2, sizeof(uint32), &rx);
 		_setKernelArg(_carry_sub, 3, sizeof(uint32), &ry);
-		_executeKernel(_carry_sub, (1u << _ln) / CARRY_LENGTH, 1u << _carry_shift);
+		_executeKernel(_carry_sub, (1u << LN) / CARRY_LENGTH, 1u << _carry_shift[LN]);
 	}
 
 	void carry_complete(const size_t reg_x, const bool nega)
@@ -381,7 +368,7 @@ public:
 		const uint32 rx = uint32(reg_x); const int32 is_nega = nega ? 1 : 0;
 		_setKernelArg(_carry_complete, 2, sizeof(uint32), &rx);
 		_setKernelArg(_carry_complete, 3, sizeof(int32), &is_nega);
-		_executeKernel(_carry_complete, ((1u << _ln) / CARRY_LENGTH) >> _carry_shift);
+		_executeKernel(_carry_complete, ((1u << LN) / CARRY_LENGTH) >> _carry_shift[LN]);
 	}
 
 	void mod_Q(const size_t reg_x)
@@ -404,11 +391,11 @@ public:
 		const uint32 ry = uint32(reg_y), rx = uint32(reg_x);
 		_setKernelArg(_set, 1, sizeof(uint32), &ry);
 		_setKernelArg(_set, 2, sizeof(uint32), &rx);
-		_executeKernel(_set, 1u << (_ln - 2));
+		_executeKernel(_set, 1u << (LN - 2));
 	}
 
 	void extend01()
 	{
-		_executeKernel(_extend, 2u << (_ln - 2));	// Reg0 & Reg1
+		_executeKernel(_extend, 2u << (LN - 2));	// Reg0 & Reg1
 	}
 };

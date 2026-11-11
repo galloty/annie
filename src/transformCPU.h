@@ -846,7 +846,7 @@ public:
 		return true;
 	}
 
-	void save_checkpoint(file & cfile) const override
+	void save_checkpoint(file & cfile) override
 	{
 		const size_t n = size_t(1) << _ln;
 
@@ -950,10 +950,20 @@ public:
 		delete[] _carry;
 	}
 
-	std::string get_info() const override
+	std::string get_type() const override { return ""; }
+	std::string get_data_size() const override { return ""; }
+	std::string get_cache_size() const override { return ""; }
+
+	std::string get_info_short() const override
 	{
 		const size_t n = size_t(1) << _ln;
-		std::ostringstream ss; ss << "Montgomery-McLaughlin-Gallot-Woltman reduction of length " << n << "x" << _lbase << " bits" << std::endl;
+		std::ostringstream ss; ss << "length " << n << "x" << _lbase << " bits";
+		return (ss.str());
+	}
+
+	std::string get_info() const override
+	{
+		std::ostringstream ss; ss << "Montgomery-McLaughlin-Gallot-Woltman reduction of " << get_info_short() << std::endl;
 		return (ss.str());
 	}
 };

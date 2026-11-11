@@ -25,6 +25,8 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #include <gmp.h>
 
+// #define	QUICK_TEST	true
+
 #include "annie.h"
 #include "ocl.h"
 
@@ -35,8 +37,6 @@ extern "C" {
 #include <pari.h>
 }
 #pragma GCC diagnostic pop
-
-// #define	QUICK_TEST	true
 
 class application
 {

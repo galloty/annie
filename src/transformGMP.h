@@ -164,7 +164,7 @@ public:
 
 	bool has_checkpoint() const override { return false; }
 	bool read_checkpoint(file &) override { return false; }
-	void save_checkpoint(file &) const override {}
+	void save_checkpoint(file &) override {}
 
 public:
 	transformGMP(const mpz_t & N, const int32_t a) : transform()
@@ -198,9 +198,19 @@ public:
 		for (size_t i = 0; i < reg_count; ++i) mpz_clear(_reg[i]);
 	}
 
+	std::string get_type() const override { return ""; }
+	std::string get_data_size() const override { return ""; }
+	std::string get_cache_size() const override { return ""; }
+
+	std::string get_info_short() const override
+	{
+		std::ostringstream ss; ss << "length " << _n << " bits";
+		return (ss.str());
+	}
+
 	std::string get_info() const override
 	{
-		std::ostringstream ss; ss << "Montgomery-McLaughlin-Gallot-Woltman reduction of length " << _n << " bits" << std::endl;
+		std::ostringstream ss; ss << "Montgomery-McLaughlin-Gallot-Woltman reduction of " << get_info_short() << std::endl;
 		return (ss.str());
 	}
 };

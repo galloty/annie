@@ -31,11 +31,15 @@ public:
 
 	virtual bool has_checkpoint() const = 0;
 	virtual bool read_checkpoint(file & cfile) = 0;					// read r_0 and r_1
-	virtual void save_checkpoint(file & cfile) const = 0;			// save r_0 and r_1
+	virtual void save_checkpoint(file & cfile) = 0;					// save r_0 and r_1
 
 public:
 	transform() {}
 	virtual ~transform() {}
 
+	virtual std::string get_type() const = 0;
+	virtual std::string get_data_size() const = 0;
+	virtual std::string get_cache_size() const = 0;
+	virtual std::string get_info_short() const = 0;
 	virtual std::string get_info() const = 0;
 };

@@ -139,15 +139,15 @@ public:
 using ZP1 = ZPT<P1, Q1, MR1, RSQ1, MPR1>;
 using ZP2 = ZPT<P2, Q2, MR2, RSQ2, MPR2>;
 
+template<int LN>
 class transformGPU : public transform
 {
 private:
 	static const size_t Reg_w_R = 3, Reg_w_Q = 4, Reg_N_Q = 5, Reg_Ninv_R = 6, Reg_t_Q = 7, Reg_t = 8, Reg_one = 9, Reg_count = 10;
-	int _ln = 0;
-	int _lbase = 0;
+	engine<LN> _engine;
+	const int _lbase;
 	bool _init_failed = false;
 	mpz_t _Nz;
-	engine * _engine = nullptr;
 	ZP * _buf = nullptr;
 	std::string _hinfo;
 
@@ -177,7 +177,7 @@ private:
 
 	void set_mpz(const size_t reg_y, const mpz_t & x)
 	{
-		const size_t n = size_t(1) << _ln;
+		const size_t n = size_t(1) << LN;
 		const int lbase = _lbase;
 		const uint32 base = 1u << lbase;
 		ZP * const buf = _buf;
@@ -193,22 +193,20 @@ private:
 			bit_index += size_t(lbase);
 		}
 
-		engine * const eng = _engine;
-		eng->write_memory(reg_y, buf);
-		eng->write_memory(Reg_count + reg_y, buf);
+		_engine.write_memory(reg_y, buf);
+		_engine.write_memory(Reg_count + reg_y, buf);
 	}
 
 	void get_mpz(mpz_t & y, const size_t reg_x)
 	{
-		const int ln = _ln;
-		const size_t n = size_t(1) << ln;
+		const size_t n = size_t(1) << LN;
 		const int lbase = int(_lbase);
 		const uint32 base = 1u << lbase;
 		ZP * const buf = _buf;
 
-		_engine->read_memory(reg_x, buf);
+		_engine.read_memory(reg_x, buf);
 
-		const size_t y_size = (size_t(lbase) << ln) / 64 + 2;
+		const size_t y_size = (size_t(lbase) << LN) / 64 + 2;
 		mp_limb_t * const y_ptr = mpz_limbs_write(y, y_size);
 		for (size_t i = 0; i < y_size; ++i) y_ptr[i] = 0;
 
@@ -232,7 +230,7 @@ private:
 		if (f != 0)
 		{
 			mpz_t t; mpz_init_set_si(t, long(f));
-			mpz_mul_2exp(t, t, mp_bitcnt_t(lbase) << ln);
+			mpz_mul_2exp(t, t, mp_bitcnt_t(lbase) << LN);
 			mpz_add(y, y, t);
 			mpz_clear(t);
 		}
@@ -240,45 +238,39 @@ private:
 
 	finline void NTT_forward8(const size_t reg_x, const size_t reg_w)
 	{
-		const int ln = _ln;
-		engine * const eng = _engine;
+		if (LN <= 12) _engine.forward8_0(reg_x, reg_w);
+		else if (LN <= 16) _engine.forward64_0(reg_x, reg_w);
+		else _engine.forward512_0(reg_x, reg_w);
 
-		if (ln <= 12) eng->forward8_0(reg_x, reg_w);
-		else if (ln <= 16) eng->forward64_0(reg_x, reg_w);
-		else eng->forward512_0(reg_x, reg_w);
-
-		if (ln >= 21) eng->forward8(reg_x, reg_w, ln - 3 - 9, 512);
+		if (LN >= 21) _engine.forward8(reg_x, reg_w, LN - 3 - 9, 512);
 	}
 
 	finline void NTT_inverse8(const size_t reg_x, const size_t reg_w)
 	{
-		const int ln = _ln;
-		engine * const eng = _engine;
+		if (LN >= 21) _engine.backward8(reg_x, reg_w, LN - 3 - 9, 512);
 
-		if (ln >= 21) eng->backward8(reg_x, reg_w, ln - 3 - 9, 512);
-
-		if (ln <= 12) eng->backward8_0(reg_x, reg_w);
-		else if (ln <= 16) eng->backward64_0(reg_x, reg_w);
-		else eng->backward512_0(reg_x, reg_w);
+		if (LN <= 12) _engine.backward8_0(reg_x, reg_w);
+		else if (LN <= 16) _engine.backward64_0(reg_x, reg_w);
+		else _engine.backward512_0(reg_x, reg_w);
 	}
 
 	finline void NTT_forward(const size_t reg_x, const size_t reg_w)
 	{
 		NTT_forward8(reg_x, reg_w);
-		_engine->fwd(reg_x, reg_w);
+		_engine.fwd(reg_x, reg_w);
 	}
 
 	finline void square(const size_t reg_x, const size_t reg_w)
 	{
 		NTT_forward8(reg_x, reg_w);
-		_engine->square(reg_x, reg_w);
+		_engine.square(reg_x, reg_w);
 		NTT_inverse8(reg_x, reg_w);
 	}
 
 	finline void mul_const(const size_t reg_y, const size_t reg_x, const size_t reg_w)
 	{
 		NTT_forward8(reg_y, reg_w);
-		_engine->mul(reg_y, reg_x, reg_w);
+		_engine.mul(reg_y, reg_x, reg_w);
 		NTT_inverse8(reg_y, reg_w);
 	}
 
@@ -290,22 +282,20 @@ private:
 
 	finline void carry_mul(const size_t reg_x, const int32 a, const bool nega)
 	{
-		engine * const eng = _engine;
-		eng->carry_mul(reg_x, a);
-		eng->carry_complete(reg_x, nega);
+		_engine.carry_mul(reg_x, a);
+		_engine.carry_complete(reg_x, nega);
 	}
 
 	finline void carry_sub(const size_t reg_x, const size_t reg_y, const bool nega)
 	{
-		engine * const eng = _engine;
-		eng->carry_sub(reg_x, reg_y);
-		eng->carry_complete(reg_x, nega);
+		_engine.carry_sub(reg_x, reg_y);
+		_engine.carry_complete(reg_x, nega);
 	}
 
-	finline void mod_Q(const size_t reg_x) { _engine->mod_Q(reg_x); }
-	finline void mod_R_add2(const size_t reg_x) { _engine->mod_R_add2(reg_x); }
+	finline void mod_Q(const size_t reg_x) { _engine.mod_Q(reg_x); }
+	finline void mod_R_add2(const size_t reg_x) { _engine.mod_R_add2(reg_x); }
 
-	finline void set(const size_t reg_y, const size_t reg_x) { _engine->set(reg_y, reg_x); }
+	finline void set(const size_t reg_y, const size_t reg_x) { _engine.set(reg_y, reg_x); }
 
 	// Montgomery-McLaughlin-Gallot-Woltman multiplication
 
@@ -359,15 +349,14 @@ private:
 public:
 	void set1() override
 	{
-		_engine->set(Reg0, Reg_one);
+		_engine.set(Reg0, Reg_one);
 	}
 
 	void get(mpz_t & z, const size_t src) override
 	{
 		// Conversion out of Montgomery-McLaughlin-Gallot-Woltman form
-		engine * const eng = _engine;
-		eng->set(Reg_t_Q, src);
-		eng->set(Reg_t, src);
+		_engine.set(Reg_t_Q, src);
+		_engine.set(Reg_t, src);
 		reduceMMGW(Reg_t);
 		get_mpz(z, Reg_t);
 
@@ -377,7 +366,7 @@ public:
 
 	void copy(const size_t dst, const size_t src) override
 	{
-		_engine->set(dst, src);
+		_engine.set(dst, src);
 	}
 
 	void square_mul(const int32_t a) override
@@ -397,79 +386,36 @@ public:
 
 	bool read_checkpoint(file & cfile) override
 	{
-		const size_t n = size_t(1) << _ln;
+		const size_t n = size_t(1) << LN;
 		ZP * const buf = _buf;
 		const bool success = cfile.read(reinterpret_cast<char *>(buf), 2 * n * sizeof(ZP));
 		if (success)
 		{
-			engine * const eng = _engine;
-			eng->write_memory(Reg0, buf, 2);
-			eng->extend01();
+			_engine.write_memory(Reg0, buf, 2);
+			_engine.extend01();
 		}
 		return success;
 	}
 
-	void save_checkpoint(file & cfile) const override
+	void save_checkpoint(file & cfile) override
 	{
-		const size_t n = size_t(1) << _ln;
+		const size_t n = size_t(1) << LN;
 		ZP * const buf = _buf;
-		_engine->read_memory(Reg0, buf, 2);
+		_engine.read_memory(Reg0, buf, 2);
 		cfile.write(reinterpret_cast<const char *>(buf), 2 * n * sizeof(ZP));
 	}
 
 public:
-	std::string get_type() const { return _engine->getType(); }
-	std::string get_data_size() const
-	{
-		const size_t data_size = _engine->get_data_size();
-		std::ostringstream ss; ss << "data size: ";
-		if (data_size < (10u << 20)) ss << data_size / (1u << 10) << " KB"; else ss << data_size / (1u << 20) << " MB";
-		return ss.str();
-	}
-	std::string get_cache_size() const
-	{
-		const size_t cache_size = _engine->get_cache_size();
-		std::ostringstream ss; ss << "cache size: ";
-		if (cache_size < (10u << 20)) ss << cache_size / (1u << 10) << " KB"; else ss << cache_size / (1u << 20) << " MB";
-		return ss.str();
-	}
-	std::string get_info_short() const
-	{
-		const size_t n = size_t(1) << _ln;
-		std::ostringstream ss; ss << "length " << n << "x" << _lbase << " bits";
-		return (ss.str());
-	}
-
-	transformGPU(const mpz_t & N, const int32_t a, const size_t device_id) : transform()
+	transformGPU(const mpz_t & N, const size_t device_id, const int lbase)
+		: transform(), _engine(device_id), _lbase(lbase)
 	{
 		mpz_t R, t; mpz_inits(_Nz, R, t, nullptr);
 
-		// R = base^n - 1, Q = base^n + 1 such that base^n > 16 * a * N and n is a power of two
-		const size_t m_2 = mpz_sizeinbase(N, 2) + size_t(32 - __builtin_clz((unsigned int)(a))) + 4;
-		int ln;
-		for (unsigned int lbase = 31; lbase >= 1; --lbase)
-		{
-			// base is a power of two
-			const uint32 base = (1u << lbase);
-			const size_t m = (m_2 + lbase - 1) / lbase;
-			ln = 4; while ((size_t(1) << ln) < m) ++ln;
-			// A necessary condition is a * n * base^2 < (P1 * P2) / 2
-			const double dbase = double(base);
-			if (double(size_t(a) << ln) * dbase * dbase < (P1 * uint64(P2)) / 2)
-			{
-				_ln = ln;
-				_lbase = int(lbase);
-				break;
-			}
-		}
-
-		if (ln > 23) throw std::runtime_error("NTT size > 2^23 is not supported");
-		const size_t n = size_t(1) << ln;
-		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
+		const size_t n = size_t(1) << LN;
 
 		_buf = new ZP[2 * n];
 
-		mpz_set_ui(R, 1); mpz_mul_2exp(R, R, lbase << ln); mpz_sub_ui(R, R, 1);
+		mpz_set_ui(R, 1); mpz_mul_2exp(R, R, mp_bitcnt_t(lbase) << LN); mpz_sub_ui(R, R, 1);
 		if (mpz_invert(t, N, R) == 0)
 		{
 			mpz_gcd(_Nz, N, R);
@@ -478,12 +424,9 @@ public:
 			return;
 		}
 
-		_engine = new engine(ln, device_id);
-		engine * const eng = _engine;
-
 		std::ostringstream src;
 
-		src << "#define LN_SZ\t" << ln << std::endl;
+		src << "#define LN_SZ\t" << LN << std::endl;
 		src << "#define N_SZ\t" << n << "u" << std::endl;
 		src << "#define LBASE\t" << lbase << std::endl;
 
@@ -500,11 +443,11 @@ public:
 		src << "#define P1P2\t" << (P1 * uint64(P2)) << "ul" << std::endl;
 
 		// Not converted into Montgomery form such that output is converted out of MF
-		src << "#define NORM1\t" << ZP1::norm(ln - 1).get() << "u" << std::endl;
-		src << "#define NORM2\t" << ZP2::norm(ln - 1).get() << "u" << std::endl;
+		src << "#define NORM1\t" << ZP1::norm(LN - 1).get() << "u" << std::endl;
+		src << "#define NORM2\t" << ZP2::norm(LN - 1).get() << "u" << std::endl;
 
 		src << "#define CARRY_LENGTH\t" << CARRY_LENGTH << "u"  << std::endl;
-		src << "#define CARRY_WG_SZ\t" << eng->get_carry_workgroup_size() << "u" << std::endl;
+		src << "#define CARRY_WG_SZ\t" << _engine.get_carry_workgroup_size() << "u" << std::endl;
 
 		src << "#define Z_OFFSET\t" << (Reg_count * n) << "u" << std::endl;
 
@@ -520,19 +463,19 @@ public:
 		src << "#define CHUNK64\t" << CHUNK64 << std::endl;
 		src << "#define CHUNK512\t" << CHUNK512 << std::endl;
 
-		if (!eng->readOpenCL("ocl/kernel.cl", "src/ocl/kernel.h", "src_ocl_kernel", src)) src << src_ocl_kernel;
+		if (!_engine.readOpenCL("ocl/kernel.cl", "src/ocl/kernel.h", "src_ocl_kernel", src)) src << src_ocl_kernel;
 
-		eng->loadProgram(src.str());
-		eng->alloc_memory(Reg_count);
-		eng->create_kernels();
+		_engine.loadProgram(src.str());
+		_engine.alloc_memory(Reg_count);
+		_engine.create_kernels();
 
-		ZP1::set_roots_R(&_buf[0 * (n / 2)], &_buf[1 * (n / 2)], ln);
-		ZP1::set_roots_Q(&_buf[2 * (n / 2)], &_buf[3 * (n / 2)], ln);
-		eng->write_memory(Reg_w_R, _buf, 2);
+		ZP1::set_roots_R(&_buf[0 * (n / 2)], &_buf[1 * (n / 2)], LN);
+		ZP1::set_roots_Q(&_buf[2 * (n / 2)], &_buf[3 * (n / 2)], LN);
+		_engine.write_memory(Reg_w_R, _buf, 2);
 
-		ZP2::set_roots_R(&_buf[0 * (n / 2)], &_buf[1 * (n / 2)], ln);
-		ZP2::set_roots_Q(&_buf[2 * (n / 2)], &_buf[3 * (n / 2)], ln);
-		eng->write_memory(Reg_count + Reg_w_R, _buf, 2);
+		ZP2::set_roots_R(&_buf[0 * (n / 2)], &_buf[1 * (n / 2)], LN);
+		ZP2::set_roots_Q(&_buf[2 * (n / 2)], &_buf[3 * (n / 2)], LN);
+		_engine.write_memory(Reg_count + Reg_w_R, _buf, 2);
 
 		mpz_set(_Nz, N);
 		set_mpz(Reg_N_Q, N);
@@ -556,13 +499,36 @@ public:
 	{
 		mpz_clear(_Nz);
 
-		engine * const eng = _engine;
-		eng->release_kernels();
-		eng->release_memory();
-		eng->clearProgram();
-		delete eng;
+		_engine.release_kernels();
+		_engine.release_memory();
+		_engine.clearProgram();
 
 		delete[] _buf;
+	}
+
+	std::string get_type() const override { return _engine.getType(); }
+
+	std::string get_data_size() const override
+	{
+		const size_t data_size = _engine.get_data_size();
+		std::ostringstream ss; ss << "data size: ";
+		if (data_size < (10u << 20)) ss << data_size / (1u << 10) << " KB"; else ss << data_size / (1u << 20) << " MB";
+		return ss.str();
+	}
+
+	std::string get_cache_size() const override
+	{
+		const size_t cache_size = _engine.get_cache_size();
+		std::ostringstream ss; ss << "cache size: ";
+		if (cache_size < (10u << 20)) ss << cache_size / (1u << 10) << " KB"; else ss << cache_size / (1u << 20) << " MB";
+		return ss.str();
+	}
+
+	std::string get_info_short() const override
+	{
+		const size_t n = size_t(1) << LN;
+		std::ostringstream ss; ss << "length " << n << "x" << _lbase << " bits";
+		return (ss.str());
 	}
 
 	std::string get_info() const override
@@ -571,3 +537,54 @@ public:
 		return (ss.str());
 	}
 };
+
+inline transform * create_transformGPU(const mpz_t & N, const int32_t a, const size_t device_id)
+{
+	// R = base^n - 1, Q = base^n + 1 such that base^n > 16 * a * N and n is a power of two
+	const size_t m_2 = mpz_sizeinbase(N, 2) + size_t(32 - __builtin_clz((unsigned int)(a))) + 4;
+	int ln, lbase;
+	for (lbase = 31; lbase >= 1; --lbase)
+	{
+		// base is a power of two
+		const uint32 base = 1u << lbase;
+		const size_t m = (m_2 + size_t(lbase) - 1) / uint32(lbase);
+		ln = 4; while ((size_t(1) << ln) < m) ++ln;
+		// A necessary condition is a * n * base^2 < (P1 * P2) / 2
+		const double dbase = double(base);
+		if (double(size_t(a) << ln) * dbase * dbase < (P1 * uint64(P2)) / 2) break;
+	}
+
+#if defined(QUICK_TEST)
+	if (ln < 4) throw std::runtime_error("NTT size < 2^4 is not supported");
+#else
+	if (ln < 11) throw std::runtime_error("NTT size < 2^11 is not supported");
+#endif
+	if (ln > 23) throw std::runtime_error("NTT size > 2^23 is not supported");
+
+	transform * p_transform = nullptr;
+
+#if defined(QUICK_TEST)
+	if      (ln ==  4) p_transform = new transformGPU<4>(N, device_id, lbase);
+	else if (ln ==  5) p_transform = new transformGPU<5>(N, device_id, lbase);
+	else if (ln ==  6) p_transform = new transformGPU<6>(N, device_id, lbase);
+	else if (ln ==  7) p_transform = new transformGPU<7>(N, device_id, lbase);
+	else if (ln ==  8) p_transform = new transformGPU<8>(N, device_id, lbase);
+	else if (ln ==  9) p_transform = new transformGPU<9>(N, device_id, lbase);
+	else if (ln == 10) p_transform = new transformGPU<10>(N, device_id, lbase);
+#endif
+	if      (ln == 11) p_transform = new transformGPU<11>(N, device_id, lbase);
+	else if (ln == 12) p_transform = new transformGPU<12>(N, device_id, lbase);
+	else if (ln == 13) p_transform = new transformGPU<13>(N, device_id, lbase);
+	else if (ln == 14) p_transform = new transformGPU<14>(N, device_id, lbase);
+	else if (ln == 15) p_transform = new transformGPU<15>(N, device_id, lbase);
+	else if (ln == 16) p_transform = new transformGPU<16>(N, device_id, lbase);
+	else if (ln == 17) p_transform = new transformGPU<17>(N, device_id, lbase);
+	else if (ln == 18) p_transform = new transformGPU<18>(N, device_id, lbase);
+	else if (ln == 19) p_transform = new transformGPU<19>(N, device_id, lbase);
+	else if (ln == 20) p_transform = new transformGPU<20>(N, device_id, lbase);
+	else if (ln == 21) p_transform = new transformGPU<21>(N, device_id, lbase);
+	else if (ln == 22) p_transform = new transformGPU<22>(N, device_id, lbase);
+	else if (ln == 23) p_transform = new transformGPU<23>(N, device_id, lbase);
+
+	return p_transform;
+}

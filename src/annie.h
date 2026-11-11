@@ -245,7 +245,7 @@ public:
 			print(ss.str());
 		}
 
-		transform * const p_transform = (nsize < 80) ? (transform *)(new transformGMP(n, a)) : (transform *)(new transformGPU(n, a, device));
+		transform * const p_transform = (nsize < 10000) ? dynamic_cast<transform *>(new transformGMP(n, a)) : create_transformGPU(n, a, device);
 		if (p_transform->init_failed())
 		{
 			if (verbose)
@@ -424,7 +424,7 @@ public:
 		{
 			mpz_set_ui(n, 3); mpz_mul_2exp(n, n, e); mpz_add_ui(n, n, 1);
 
-			transformGPU * const p_transform = new transformGPU(n, 3, device);
+			transform * const p_transform = create_transformGPU(n, 3, device);
 
 			if (first)
 			{
