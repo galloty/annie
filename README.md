@@ -11,7 +11,7 @@ If the input is of the form *k*&nbsp;&middot;&nbsp;2<sup>*n*</sup>&nbsp;+&nbsp;1
 
 The input is a [Pari/GP](https://pari.math.u-bordeaux.fr/) math expression. For example: "208003!-1", "3267113#-1", "fibonacci(4740217)", "(sqrtnint(10^999999,1024)+407852)^1024+1".
 
-[McLaughlin](https://pubs.ams.org/MCOM/2004-73-246/S0025-5718-03-01543-6) extended [Montgomery modular multiplication](https://en.wikipedia.org/wiki/Montgomery_modular_multiplication) to modular polynomial arithmetic. This is suited for use with Number Theoretic Transform (NTT) methods for multiplication.  
+[Philip B. McLaughlin](https://pubs.ams.org/MCOM/2004-73-246/S0025-5718-03-01543-6) extended [Montgomery modular multiplication](https://en.wikipedia.org/wiki/Montgomery_modular_multiplication) to modular polynomial arithmetic. This is suited for use with Number Theoretic Transform (NTT) methods for multiplication.  
 Yves Gallot and George Woltman improved this algorithm by using the polynomials *R*&nbsp;=&nbsp;2<sup>*n*</sup>&nbsp;-&nbsp;1 and *Q*&nbsp;=&nbsp;2<sup>*n*</sup>&nbsp;+&nbsp;1 and the form *x*&nbsp;'&nbsp;=&nbsp;2<sup>-1</sup>&nbsp;R&nbsp;x&nbsp;(mod&nbsp;*N*).  
 The proof of the algorithm can be found [here](https://github.com/galloty/annie/tree/main/doc).  
 
