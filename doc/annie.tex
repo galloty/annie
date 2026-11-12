@@ -1,0 +1,185 @@
+\documentclass[a4paper, 12pt, pdftex]{article}
+\usepackage{graphicx}
+%\usepackage[pdftex, colorlinks]{hyperref}
+\usepackage{amsmath, amsthm}
+\usepackage{enumitem}
+\usepackage{hyperref}
+
+\usepackage[T1]{fontenc}
+\usepackage[full]{textcomp}
+
+%\usepackage{arev}
+%\usepackage{fourier}
+%\usepackage{fouriernc}
+%\usepackage[utopia]{mathdesign}
+%\usepackage[garamond]{mathdesign}
+\usepackage[charter]{mathdesign}
+%\usepackage{kpfonts}
+
+%\usepackage{times}           % Times + Helvetica + Courier + Symbol 
+%\usepackage{mathptmx}        % Times + Helvetica + Courier + Times Math
+%\usepackage{mathpazo}        % Palatino + Helvetica + Courier + Palatino 
+%\usepackage{newcent}         % New Century Schoolbook + Avant Garde + Courier
+%\usepackage{bookman}         % Bookman + Avant Garde + Courier
+
+%\DeclareGraphicsExtensions{.eps , .pdf}
+
+\usepackage{fullpage}
+%\setlength{\topmargin}{0 cm}
+%\setlength{\headheight}{-2.5 cm}
+%\setlength{\headsep}{0 cm}
+%\advance\textheight by 4.0 cm
+%\advance\textwidth by 2.0 cm
+%\advance\oddsidemargin by -1.0 cm
+%\advance\evensidemargin by -1.0 cm
+
+\usepackage{amsmath}
+\usepackage[utf8]{inputenc}
+%\usepackage[noend]{algorithm, algpseudocode}
+
+\setlength{\parindent}{0cm}
+\sloppy
+\pagestyle{plain}
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}
+\newtheorem{corollary}{Corollary}
+\newtheorem{lemma}{Lemma}
+\newtheorem{conjecture}{Conjecture}
+
+\theoremstyle{definition}
+\newtheorem{examples}{Examples}
+\newtheorem{definition}{Definition}
+
+\DeclareMathOperator{\hash}{hash}
+
+%\date{}
+
+
+
+
+\begin{document}
+%\thispagestyle{empty}
+
+\begin{center}
+\huge Annie
+\end{center}
+\begin{center}
+\large Montgomery McLaughlin Gallot Woltman algorithm
+\end{center}
+\begin{center}
+\it \large Yves Gallot
+\end{center}
+
+\bigskip
+\bigskip
+
+Notation:\\
+"$\bmod\, M$" is the operator: $y = x \mod M \Rightarrow y \in [0, M - 1]$.\\
+The congruence relation is noted $a \equiv b \pmod M$.
+
+\subsection*{Montgomery modular multiplication}
+Peter~L.~Montgomery presented a method for multiplying two integers modulo $N$ while avoiding division by $N$ \cite{Montgomery1}.
+\begin{theorem}
+Let $N$ be a positive integer, $R > N$, $\gcd(R,\, N) = 1$, $0 \leq x, y < N$. If
+\begin{enumerate}[label={(\arabic*)}]
+\item $T = x\,y$,
+\item $m = -T\,N^{-1} \mod R$,
+\item $r = (T + m\, N)\, /\, R$,
+\item $t = r - N$ if $r \geq N$ and $t = r$ otherwise
+\end{enumerate}
+then $t = R^{-1}\, x\,y \mod N$.
+\end{theorem}
+\begin{proof}
+(2) $\Rightarrow m\, N \equiv -T \pmod R$ then $r$ is an integer.
+(3) $\Rightarrow r \equiv T\, R^{-1} \pmod N$.\\
+$0 \leq m\, N < R\, N$ and $0 \leq T < N^2 < R\, N$ then $0 \leq r < 2\,N$.
+\end{proof}
+
+In practice, $x$ is converted into Montgomery form $x^* = R\, x \mod N$
+($y$, $z$ resp.).\\ We have
+$z = x\,y\mod N \Leftrightarrow z^*= R^{-1}\, x^*\,y^* \mod N$.
+Conversion out of Montgomery form is done by computing $x = R^{-1}\, x^* \mod N$.
+
+\subsection*{Montgomery modular multiplication without test}
+
+The test (4) can be removed if $R > 4\,N$ and $0 \leq x, y, r < 2\,N$.
+\begin{theorem}
+Let $N$ be a positive integer, $R > 4\,N$, $\gcd(R,\, N) = 1$, $0 \leq x, y < 2\,N$. If
+\begin{enumerate}[label={(\arabic*)}]
+\item $T = x\,y$,
+\item $m = -T\,N^{-1} \mod R$,
+\item $r = (T + m\, N)\, /\, R$
+\end{enumerate}
+then $r \equiv R^{-1}\, x\,y \pmod N$ and $0 \leq r < 2\,N$.
+\end{theorem}
+\begin{proof}
+$0 \leq m\, N < R\, N$ and $0 \leq T < 4\,N^2 < R\, N$ then $0 \leq r < 2\,N$.
+\end{proof}
+
+\subsection*{McLaughlin modular multiplication (without test)}
+
+Philip~B.~McLaughlin~Jr. extended the method using a second integer Q \cite{McLaughlin1}.
+
+\begin{theorem}
+Let $N$ be a positive integer, $R > 4\,N$, $Q > R$,
+$\gcd(R,\, N) = \gcd(Q,\, R) = 1$, $0 \leq x, y < 2\,N$. If
+\begin{enumerate}[label={(\arabic*)}]
+\item $T_R = x\,y \mod R$, $T_Q = x\,y \mod Q$,
+\item $m = -T_R\,N^{-1} \mod R$,
+\item $r = (T_Q + m\, N)\, R^{-1} \mod Q$
+\end{enumerate}
+then $r \equiv R^{-1}\, x\,y \pmod N$ and $0 \leq r < 2\,N$.
+\end{theorem}
+\begin{proof}
+$Q > 2\,N$ and $r$ in $[0, Q - 1]$ is unique. Then $r$ is the solution.
+\end{proof}
+
+\subsection*{Gallot \& Woltman method}
+
+The following method has emerged from a discussion on the mersenneforum \cite{Gallot1}.\\
+
+$Q = R + 2$ is fixed. $R$ must be odd such that $\gcd(Q,\, R) = 1$.\\
+Because $R^{-1} = -2^{-1} \mod Q$, we define the new form
+$$x^* = 2^{-1}\,R\, x \mod N$$
+($y$, $z$ resp.). Now, we have
+$z = x\,y\mod N \Leftrightarrow z^*= 2\,R^{-1}\, x^*\,y^* \mod N$.\\
+Note that $N$ must be odd such that $2^{-1} \mod N$ exists.
+If $T_R \neq 0$ and $m' = T_R\,N^{-1} \mod R$ then $m = R - m' = -(m' + 2) \mod Q$. If $T_R = 0$ then $T_Q = m' = 0$ and $r = N$.\\
+Finally, if $0 \leq x < 2\,N$ then $0 \leq r \leq 4\,N$. New conditions are
+needed:
+\begin{theorem}
+Let $N$ and $R$ be positive odd integers, $\gcd(R,\, N) = 1$, $R > 16\,N$,
+$Q = R + 2$, $0 \leq x, y < 4\,N$. If
+\begin{enumerate}[label={(\arabic*)}]
+\item $T_R = x\,y \mod R$, $T_Q = x\,y \mod Q$,
+\item $m' = T_R\,N^{-1} \mod R$,
+\item $r' = \left((m' + 2)\, N - T_Q\right) \mod Q$
+\end{enumerate}
+then $r' \equiv 2\,R^{-1}\,x\,y \pmod N$ and $0 \leq r' < 4\,N$.
+\end{theorem}
+\begin{proof}
+We have $r' = 2\,r = 2\,(T + m\, N)\, /\, R$.
+$0 \leq m\, N < R\, N$ and $0 \leq T < 16\,N^2 < R\, N$ then $0 \leq r' < 4\,N$.
+\end{proof}
+
+\medskip
+
+The implementation in Annie uses $R = 2^n - 1$. The polynomial multiplication modulo $R$ is a cyclic  (positive-wrapped) convolution and modulo $Q$ is a negacyclic (negative-wrapped) convolution.\\
+Number Theoretic Transforms achieve $O(n \log n)$ time complexity (they are a divide and conquer technique).\\
+The code for the cyclic and negacyclic convolutions is shared. The twiddle factors are the $n$\textsuperscript{th} root of unity for $R$ and the $n$\textsuperscript{th} root of $-1$ for $Q$.
+
+
+\begin{thebibliography}{99}
+
+\bibitem{Gallot1} Yves~Gallot, George~Woltman \textit{et~al}., \emph{A new algorithm for generic modular reduction}, mersenneforum.org, Aug.--Sep.~2023,\\ \url{https://www.mersenneforum.org/node/22013}.
+
+\bibitem{McLaughlin1} Philip~B.~McLaughlin~Jr., \emph{New frameworks for Montgomery’s modular multiplication method}, Math. Comp. \textbf{73} (2004), 899--906,\\ DOI: \url{https://doi.org/10.1090/S0025-5718-03-01543-6}.
+
+\bibitem{Montgomery1} Peter~L.~Montgomery, \emph{Modular multiplication without trial division}, Math. Comp. \textbf{44} (1985), 519--521,\\ DOI: \url{https://doi.org/10.1090/S0025-5718-1985-0777282-X}.
+
+
+\end{thebibliography}
+
+\end{document}
+
