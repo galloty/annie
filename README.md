@@ -24,7 +24,7 @@ Any number with up to approximately 48 million digits can be tested.
 
  - Linux x64  
  - Windows x64  
- - MacOS for Arm or Intel has not been tested, but *annie* should work.
+ - ARM-based MacOS
 
 ## Build
 
