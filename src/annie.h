@@ -104,7 +104,7 @@ public:
 		const int dcount = std::max(int(1.0 / mul_time), 2);
 		const double remaining_time = mul_time * i, expected_time = elapsed_time / percent;
 		std::cout << std::setprecision(3) << percent * 100.0 << "% done, " << timer::format_time(remaining_time)
-				<< "/" << timer::format_time(expected_time) << " remaining, " << mul_time * 1e3 << " ms/bit.        \r";
+				<< "/" << timer::format_time(expected_time) << " remaining, " << mul_time * 1e3 << " ms/bit.        \r" << std::flush;
 		_must_clearline = true;
 		return dcount;
 	}
