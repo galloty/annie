@@ -206,7 +206,7 @@ private:
 	void get_mpz(mpz_t & y, const size_t reg_x)
 	{
 		const size_t n = size_t(1) << LN;
-		const int lbase = int(_lbase);
+		const int lbase = _lbase;
 		const uint32 base = 1u << lbase;
 		ZP * const buf = _buf;
 
@@ -574,9 +574,9 @@ inline transform * create_transformGPU(const mpz_t & N, const int32_t a, const s
 	else if (ln ==  7) p_transform = new transformGPU<7>(N, device_id, lbase);
 	else if (ln ==  8) p_transform = new transformGPU<8>(N, device_id, lbase);
 	else if (ln ==  9) p_transform = new transformGPU<9>(N, device_id, lbase);
-	else if (ln == 10) p_transform = new transformGPU<10>(N, device_id, lbase);
 #endif
-	if      (ln == 11) p_transform = new transformGPU<11>(N, device_id, lbase);
+	if      (ln == 10) p_transform = new transformGPU<10>(N, device_id, lbase);
+	else if (ln == 11) p_transform = new transformGPU<11>(N, device_id, lbase);
 	else if (ln == 12) p_transform = new transformGPU<12>(N, device_id, lbase);
 	else if (ln == 13) p_transform = new transformGPU<13>(N, device_id, lbase);
 	else if (ln == 14) p_transform = new transformGPU<14>(N, device_id, lbase);

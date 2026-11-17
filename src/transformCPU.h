@@ -512,43 +512,91 @@ private:
 		for (size_t k = 0; k < n; ++k) y[k] = x[k];
 	}
 
+	static constexpr mp_limb_t read_limb(const mp_limb_t * const x_ptr, const size_t x_size, const size_t i)
+	{
+		return (i < x_size) ? x_ptr[i] : 0;
+	}
+
+	static constexpr uint32_t read_word(const mp_limb_t * const x_ptr, const size_t x_size, const size_t bit_index)
+	{
+		const size_t limb_index = bit_index / 64;
+		const int limb_shift = int(bit_index % 64);
+		const mp_limb_t rl = read_limb(x_ptr, x_size, limb_index), rh = read_limb(x_ptr, x_size, limb_index + 1);
+		mp_limb_t r = rl >> limb_shift;
+		if (limb_shift != 0) r |= rh << (64 - limb_shift);
+		return uint32_t(r);
+	}
+
+	static constexpr void write_word(mp_limb_t * const x_ptr, const size_t bit_index, const uint32_t r)
+	{
+		const size_t limb_index = bit_index / 64;
+		const int limb_shift = int(bit_index % 64);
+		x_ptr[limb_index] |= mp_limb_t(r) << limb_shift;
+		if (limb_shift != 0) x_ptr[limb_index + 1] |= mp_limb_t(r) >> (64 - limb_shift);
+	}
+
 	void set_mpz(RNS * const y, const mpz_t & x)
 	{
 		const size_t n = size_t(1) << _ln;
-		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
+		const int lbase = _lbase;
 		const uint32_t base = 1u << lbase;
 		const RNS rbase = RNS(base).toMonty();
 
-		mpz_t s, r; mpz_init_set(s, x); mpz_init(r);
+		const size_t x_size = mpz_size(x);
+		const mp_limb_t * const x_ptr = mpz_limbs_read(x);
+
+		size_t bit_index = 0;
 		for (size_t i = 0; i < n; ++i)
 		{
-			mpz_mod_2exp(r, s, lbase); mpz_div_2exp(s, s, lbase);
-			const uint32_t r1 = uint32_t(mpz_get_ui(r));
-			mpz_mod_2exp(r, s, lbase); mpz_div_2exp(s, s, lbase);
-			const uint32_t r2 = uint32_t(mpz_get_ui(r));
+			const uint32_t r1 = read_word(x_ptr, x_size, bit_index) & (base - 1);
+			bit_index += size_t(lbase);
+			const uint32_t r2 = read_word(x_ptr, x_size, bit_index) & (base - 1);
+			bit_index += size_t(lbase);
 			y[i] = RNS(r1) + RNS(r2) * rbase;
 		}
-		mpz_clears(s, r, nullptr);
 	}
 
 	void get_mpz(mpz_t & y, const RNS * const x)
 	{
 		const size_t n = size_t(1) << _ln;
-		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
+		const int lbase = _lbase, lbase2 = 2 * lbase;
 		const uint32_t base = 1u << lbase;
 
-		mpz_set_ui(y, 0);
-		for (size_t i = n; i > 0; --i)
-		{
-			const int64_t f = x[i - 1].get_i64();
-			const uint32_t r1 = uint32_t(f) & (base - 1);
-			const int32_t r2 = int32_t(f >> lbase);
+		const size_t y_size = (size_t(lbase2) << _ln) / 64 + 2;
+		mp_limb_t * const y_ptr = mpz_limbs_write(y, mp_size_t(y_size));
+		for (size_t i = 0; i < y_size; ++i) y_ptr[i] = 0;
 
-			mpz_mul_2exp(y, y, lbase);
-			if (r2 > 0) mpz_add_ui(y, y, (unsigned long int)(r2));
-			else if (r2 < 0) mpz_sub_ui(y, y, (unsigned long int)(-r2));
-			mpz_mul_2exp(y, y, lbase);
-			mpz_add_ui(y, y, (unsigned long int)(r1));
+		int64_t f = 0;
+		size_t bit_index = 0;
+		for (size_t i = 0; i < n; ++i)
+		{
+			const int64_t v = x[i].get_i64();
+			const uint32_t u1 = uint32_t(v) & (base - 1);
+			const int32_t i2 = int32_t(v >> lbase);
+
+			f += int64_t(u1);
+			const uint32_t r1 = uint32_t(f) & (base - 1);
+			f >>= lbase;
+			f += i2;
+			const uint32_t r2 = uint32_t(f) & (base - 1);
+			f >>= lbase;
+
+			write_word(y_ptr, bit_index, r1);
+			bit_index += size_t(lbase);
+			write_word(y_ptr, bit_index, r2);
+			bit_index += size_t(lbase);
+		}
+
+		mp_size_t s = mp_size_t(y_size);
+		while ((s > 0) && (y_ptr[s - 1] == 0)) --s;
+ 		mpz_limbs_finish(y, s);
+
+		if (f != 0)
+		{
+			mpz_t t; mpz_init_set_si(t, long(f));
+			mpz_mul_2exp(t, t, mp_bitcnt_t(lbase2) << _ln);
+			mpz_add(y, y, t);
+			mpz_clear(t);
 		}
 	}
 
