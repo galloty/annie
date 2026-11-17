@@ -13,32 +13,48 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #include "transform.h"
 
-#define BALANCED	true
+#define BALANCED		true
+#define CARRY_LENGTH	4u
 
 // The prime finite field Z/PZ
-template<uint32_t P, uint32_t Q, uint32_t R, uint32_t RSQ, uint32_t H>
+template<uint32_t _P, uint32_t _PRIM_ROOT>
 class ZPT
 {
 private:
 	uint32_t _n;
 
 private:
-	static uint32_t _add(const uint32_t a, const uint32_t b) { return a + b - ((a >= P - b) ? P : 0); }
-	static uint32_t _sub(const uint32_t a, const uint32_t b) { return a - b + ((a < b) ? P : 0); }
+	// p * q = 1 (mod 2^32) (Newton's method)
+	static constexpr uint32_t _invert(const uint32_t p)
+	{
+		uint32_t q = 1, prev = 0;
+		while (q != prev) { prev = q; q *= 2 - p * q; }
+		return q;
+	}
+
+	static const uint32_t _Q = _invert(_P);
+
+	static uint32_t _add(const uint32_t a, const uint32_t b) { return a + b - ((a >= _P - b) ? _P : 0); }
+	static uint32_t _sub(const uint32_t a, const uint32_t b) { return a - b + ((a < b) ? _P : 0); }
 
 	// Montgomery multiplication: 2 mul + 2 mul_hi
 	static uint32_t _mul(const uint32_t a, const uint32_t b)
 	{
 		const uint64_t t = a * uint64_t(b);
 		const uint32_t lo = uint32_t(t), hi = uint32_t(t >> 32);
-		const uint32_t mp = uint32_t(((lo * Q) * uint64_t(P)) >> 32);
+		const uint32_t mp = uint32_t(((lo * _Q) * uint64_t(_P)) >> 32);
 		return _sub(hi, mp);
 	}
 
+	// 2^32 mod p = Montgomery form of 1
+	static const uint32_t _one = uint32_t((uint64_t(1) << 32) % _P);
+	// (2^32)^2 mod p
+	static const uint32_t _rsq = uint32_t((uint64_t(_one) * _one) % _P);
+
 	ZPT pow(const uint64_t e) const
 	{
-		if (e == 0) return ZPT(R);
-		ZPT r = ZPT(R), y = *this;
+		if (e == 0) return one();
+		ZPT r = one(), y = *this;
 		for (uint64_t i = e; i > 1; i /= 2)
 		{
 			if (i % 2 != 0) r *= y;
@@ -52,15 +68,21 @@ public:
 	ZPT() {}
 	explicit ZPT(const uint32_t n) : _n(n) {}
 
-	static ZPT one() { return ZPT(R); }
+	static uint32_t P() { return _P; }
+	static uint32_t Q() { return _Q; }
+
+	static ZPT one() { return ZPT(_one); }
+	static ZPT rsq() { return ZPT(_rsq); }
 
 	uint32_t get() const { return _n; }
-	int32_t get_int() const { return (int32_t)(_n - ((_n >= P / 2) ? P : 0)); }
-	void set_int(const int32_t i) { _n = (uint32_t)(i) + ((i < 0) ? P : 0); }
+
+	ZPT & set_i(const int32_t i) { _n = (uint32_t)(i) + ((i < 0) ? _P : 0); return *this; }
 
 	// Conversion into / out of Montgomery form
-	ZPT toMonty() const { return ZPT(_mul(_n, RSQ)); }
+	ZPT toMonty() const { return ZPT(_mul(_n, _rsq)); }
 	// ZPT fromMonty() const { return ZPT(_mul(_n, 1)); }
+
+	bool operator==(const ZPT & rhs) const { return (_n == rhs._n); }
 
 	ZPT & operator+=(const ZPT & rhs) { _n = _add(_n, rhs._n); return *this; }
 	ZPT & operator-=(const ZPT & rhs) { _n = _sub(_n, rhs._n); return *this; }
@@ -70,27 +92,15 @@ public:
 	ZPT operator-(const ZPT & rhs) const { return ZPT(_sub(_n, rhs._n)); }
 	ZPT operator*(const ZPT & rhs) const { return ZPT(_mul(_n, rhs._n)); }
 
-	ZPT invert() const { return pow(P - 2); }
-	static ZPT primroot_n(const int ln) { return ZPT(H).pow((P - 1) >> ln); }
-	static ZPT norm(const int ln) { return ZPT(P - ((P - 1) >> ln)); }
+	ZPT invert() const { return pow(_P - 2); }
+	static ZPT primroot_n(const int ln) { return ZPT(_PRIM_ROOT).toMonty().pow((_P - 1) >> ln); }
+	static ZPT norm(const int ln) { return ZPT(_P - ((_P - 1) >> ln)); }
 };
 
-#define P1			(125 * (1u << 25) + 1)
-#define	Q1			100663297u		// p * q = 1 (mod 2^32)
-#define	R1			100663295u		// 2^32 mod p = Montgomery form of 1
-#define	RSQ1		232465106u		// (2^32)^2 mod p
-#define	H1			301989885u		// Montgomery form of the primitive root 3
-
-#define P2			(243 * (1u << 24) + 1)
-#define	Q2			218103809u
-#define	R2			218103807u
-#define	RSQ2		3444438393u
-#define	H2			1526726649u		// MF of the primitive root 7
-
-#define CARRY_LENGTH	4u
-
-using ZP1 = ZPT<P1, Q1, R1, RSQ1, H1>;
-using ZP2 = ZPT<P2, Q2, R2, RSQ2, H2>;
+using ZP1 = ZPT<(125u << 25) + 1, 3>;
+using ZP2 = ZPT<(243u << 24) + 1, 7>;
+using ZP3 = ZPT<(235u << 24) + 1, 3>;
+using ZP4 = ZPT<( 29u << 27) + 1, 3>;
 
 // The residue number system {P1, P2}
 class RNS
@@ -98,46 +108,85 @@ class RNS
 private:
 	ZP1 _r1;
 	ZP2 _r2;
+	ZP3 _r3;
+	ZP4 _r4;
 
 private:
-	explicit RNS(const ZP1 & r1, const ZP2 & r2) : _r1(r1), _r2(r2) {}
+	explicit RNS(const ZP1 & r1, const ZP2 & r2, const ZP3 & r3, const ZP4 & r4) : _r1(r1), _r2(r2), _r3(r3), _r4(r4) {}
 
 	// Chinese remainder theorem
-	static int64_t garner(const ZP1 & r1, const ZP2 & r2)
-	{
-		const ZP1 invP2_P1 = ZP1(1797558821u);	// Montgomery form of 1 / P2 (mod P1)
-		const uint64_t P1P2 = P1 * uint64_t(P2);
 
-		const ZP1 u = (r1 - ZP1(r2.get())) * invP2_P1;	// P2 < P1
-		const uint64_t n = r2.get() + u.get() * uint64_t(P2);
-		return (n > P1P2 / 2) ? int64_t(n - P1P2) : int64_t(n);
+	int64_t garner2() const
+	{
+		static const uint32_t P1 = ZP1::P(), P2 = ZP2::P();
+		static const ZP1 invP2_P1 = ZP1(P2).toMonty().invert();	// P2 < P1
+
+		// convert to mixed-radix representation
+		const uint32_t r2 = _r2.get();
+		const uint32_t r1 = ((_r1 - ZP1(r2)) * invP2_P1).get();
+		const int32_t r1s = (r1 > P1 / 2) ? int32_t(r1 - P1) : int32_t(r1);
+
+		return int64_t(r2) + int64_t(P2) * r1s;
+	}
+
+	__int128_t garner4() const
+	{
+		static const uint32_t P1 = ZP1::P(), P2 = ZP2::P(), P3 = ZP3::P(), P4 = ZP4::P();
+		// we must have P4 < P3 < P2 < P1
+		static const ZP3 invP4_P3 = ZP3(P4).toMonty().invert();
+		static const ZP2 invP4_P2 = ZP2(P4).toMonty().invert();
+		static const ZP2 invP3_P2 = ZP2(P3).toMonty().invert();
+		static const ZP1 invP4_P1 = ZP1(P4).toMonty().invert();
+		static const ZP1 invP3_P1 = ZP1(P3).toMonty().invert();
+		static const ZP1 invP2_P1 = ZP1(P2).toMonty().invert();
+		static const uint64_t P34 = P3 * uint64_t(P4);
+
+		// convert to mixed-radix representation
+		const uint32_t r4 = _r4.get();
+		const uint32_t r3 = ((_r3 - ZP3(r4)) * invP4_P3).get();
+		const uint32_t r2 = (((_r2 - ZP2(r4)) * invP4_P2 - ZP2(r3)) * invP3_P2).get();
+		const uint32_t r1 = ((((_r1 - ZP1(r4)) * invP4_P1 - ZP1(r3)) * invP3_P1 - ZP1(r2)) * invP2_P1).get();
+		const int32_t r1s = (r1 > P1 / 2) ? int32_t(r1 - P1) : int32_t(r1);
+
+		const uint64_t r34 = r4 + uint64_t(P4) * r3;
+		const int64_t r12s = int64_t(r2) + int64_t(P2) * r1s;
+		return __int128_t(r34) + __int128_t(P34) * r12s;
 	}
 
 public:
 	RNS() {}
-	explicit RNS(const uint32_t n) : _r1(n), _r2(n) {}
+	explicit RNS(const uint32_t n) : _r1(n), _r2(n), _r3(n), _r4(n) {}
+	explicit RNS(const uint32_t n1, const uint32_t n2, const uint32_t n3, const uint32_t n4) : _r1(n1), _r2(n2), _r3(n3), _r4(n4) {}
 
-	static RNS one() { return RNS(ZP1::one(), ZP2::one()); }
+	static RNS one() { return RNS(ZP1::one(), ZP2::one(), ZP3::one(), ZP4::one()); }
 
-	uint32_t get() const { return _r1.get(); }
-	int64_t geti() const { return garner(_r1, _r2); }
-	void set_int(const int32_t i) { _r1.set_int(i); _r2.set_int(i); }
-	int32_t get_int() const { return _r1.get_int(); }
+	uint32_t get_r1() const { return _r1.get(); }
+	uint32_t get_r2() const { return _r2.get(); }
+	uint32_t get_r3() const { return _r3.get(); }
+	uint32_t get_r4() const { return _r4.get(); }
+
+	int64_t get_i64() const { return garner2(); }
+	__int128_t get_i128() const { return garner4(); }
+
+	RNS & set_i(const int32_t i) { _r1.set_i(i); _r2.set_i(i); _r3.set_i(i); _r4.set_i(i); return *this; }
 
 	// Conversion into / out of Montgomery form
-	RNS toMonty() const { return RNS(_r1.toMonty(), _r2.toMonty()); }
+	RNS toMonty() const { return RNS(_r1.toMonty(), _r2.toMonty(), _r3.toMonty(), _r4.toMonty()); }
 
-	RNS & operator+=(const RNS & rhs) { _r1 += rhs._r1; _r2 += rhs._r2; return *this; }
-	RNS & operator-=(const RNS & rhs) { _r1 -= rhs._r1; _r2 -= rhs._r2; return *this; }
-	RNS & operator*=(const RNS & rhs) { _r1 *= rhs._r1; _r2 *= rhs._r2; return *this; }
+	bool operator==(const RNS & rhs) const { return (_r1 == rhs._r1) && (_r2 == rhs._r2) && (_r3 == rhs._r3) && (_r4 == rhs._r4); }
+	bool operator!=(const RNS & rhs) const { return !(*this == rhs); }
+
+	RNS & operator+=(const RNS & rhs) { _r1 += rhs._r1; _r2 += rhs._r2; _r3 += rhs._r3; _r4 += rhs._r4; return *this; }
+	RNS & operator-=(const RNS & rhs) { _r1 -= rhs._r1; _r2 -= rhs._r2; _r3 -= rhs._r3; _r4 -= rhs._r4; return *this; }
+	RNS & operator*=(const RNS & rhs) { _r1 *= rhs._r1; _r2 *= rhs._r2; _r3 *= rhs._r3; _r4 *= rhs._r4; return *this; }
 
 	RNS operator+(const RNS & rhs) const { RNS r = *this; r += rhs; return r; }
 	RNS operator-(const RNS & rhs) const { RNS r = *this; r -= rhs; return r; }
 	RNS operator*(const RNS & rhs) const { RNS r = *this; r *= rhs; return r; }
 
-	RNS invert() const { return RNS(_r1.invert(), _r2.invert()); }
-	static RNS primroot_n(const int ln) { return RNS(ZP1::primroot_n(ln), ZP2::primroot_n(ln)); }
-	static RNS norm(const int ln) { return RNS(ZP1::norm(ln), ZP2::norm(ln)); }
+	RNS invert() const { return RNS(_r1.invert(), _r2.invert(), _r3.invert(), _r4.invert()); }
+	static RNS primroot_n(const int ln) { return RNS(ZP1::primroot_n(ln), ZP2::primroot_n(ln), ZP3::primroot_n(ln), ZP4::primroot_n(ln)); }
+	static RNS norm(const int ln) { return RNS(ZP1::norm(ln), ZP2::norm(ln), ZP3::norm(ln), ZP4::norm(ln)); }
 };
 
 class transformCPU : public transform
@@ -153,7 +202,7 @@ private:
 	RNS * _t_Q = nullptr; RNS * _t = nullptr;
 	RNS * _reg[reg_count];
 	RNS * _w_R; RNS * _wi_R; RNS * _w_Q; RNS * _wi_Q;
-	int64_t * _carry;
+	__int128_t * _carry;
 #if defined(CHECK_THEOREM)
 	double _logq_min = 1e100, _logq_max = -1e100, _logN = 0;
 #endif
@@ -467,13 +516,17 @@ private:
 	{
 		const size_t n = size_t(1) << _ln;
 		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
+		const uint32_t base = 1u << lbase;
+		const RNS rbase = RNS(base).toMonty();
 
 		mpz_t s, r; mpz_init_set(s, x); mpz_init(r);
 		for (size_t i = 0; i < n; ++i)
 		{
-			mpz_mod_2exp(r, s, lbase);
-			y[i] = RNS(uint32_t(mpz_get_ui(r)));
-			mpz_div_2exp(s, s, lbase);
+			mpz_mod_2exp(r, s, lbase); mpz_div_2exp(s, s, lbase);
+			const uint32_t r1 = uint32_t(mpz_get_ui(r));
+			mpz_mod_2exp(r, s, lbase); mpz_div_2exp(s, s, lbase);
+			const uint32_t r2 = uint32_t(mpz_get_ui(r));
+			y[i] = RNS(r1) + RNS(r2) * rbase;
 		}
 		mpz_clears(s, r, nullptr);
 	}
@@ -482,14 +535,20 @@ private:
 	{
 		const size_t n = size_t(1) << _ln;
 		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
+		const uint32_t base = 1u << lbase;
 
 		mpz_set_ui(y, 0);
 		for (size_t i = n; i > 0; --i)
 		{
+			const int64_t f = x[i - 1].get_i64();
+			const uint32_t r1 = uint32_t(f) & (base - 1);
+			const int32_t r2 = int32_t(f >> lbase);
+
 			mpz_mul_2exp(y, y, lbase);
-			const int32_t u = x[i - 1].get_int();
-			if (u > 0) mpz_add_ui(y, y, (unsigned long int)(u));
-			else if (u < 0) mpz_sub_ui(y, y, (unsigned long int)(-u));
+			if (r2 > 0) mpz_add_ui(y, y, (unsigned long int)(r2));
+			else if (r2 < 0) mpz_sub_ui(y, y, (unsigned long int)(-r2));
+			mpz_mul_2exp(y, y, lbase);
+			mpz_add_ui(y, y, (unsigned long int)(r1));
 		}
 	}
 
@@ -539,78 +598,92 @@ private:
 		else if (s0 == n / 2) mul2x4(y, x, w, n / 8);
 	}
 
-	void carry_mul_sub(RNS * const x, const RNS * const y, int64_t * const carry, const int32_t a)
+	void carry_mul_sub(RNS * const x, const RNS * const y, __int128_t * const carry, const int32_t a)
 	{
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
 		const RNS & norm = _norm;
-		const uint32_t base = (1u << lbase);
+		const uint32_t base = 1u << lbase;
+		const RNS rbase = RNS(base).toMonty();
 	
 		for (size_t i = 0; i < n / CARRY_LENGTH; ++i)
 		{
-			int64_t f = 0;
+			__int128_t f = 0;
 			for (size_t j = 0; j < CARRY_LENGTH; ++j)
 			{
 				const size_t k = i * CARRY_LENGTH + j;
 				// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF
-				f += a * (x[k] * norm).geti();
-				if (y != nullptr) f -= int64_t(y[k].get_int());
-				x[k] = RNS(uint32_t(f) & (base - 1));
+				f += a * (x[k] * norm).get_i128();
+				if (y != nullptr) f -= y[k].get_i64();
+				const uint32_t r1 = uint32_t(f) & (base - 1);
 				f >>= lbase;
+				const uint32_t r2 = uint32_t(f) & (base - 1);
+				f >>= lbase;
+				x[k] = RNS(r1) + RNS(r2) * rbase;
 			}
 			carry[i] = f;
 		}
 	}
 
-	void carry_complete(RNS * const x, int64_t * const carry, const bool nega)
+	void carry_complete(RNS * const x, __int128_t * const carry, const bool nega)
 	{
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
-		const uint32_t base = (1u << lbase);
+		const uint32_t base = 1u << lbase;
+		const RNS rbase = RNS(base).toMonty();
 
 		for (size_t i = 0; i < n / CARRY_LENGTH; ++i)
 		{
-			int64_t f = carry[((i == 0) ? (n / CARRY_LENGTH) : i) - 1];
+			__int128_t f = carry[((i == 0) ? (n / CARRY_LENGTH) : i) - 1];
 			if ((i == 0) && nega) f = -f;
 
 			for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)
 			{
 				const size_t k = i * CARRY_LENGTH + j;
-				f += int64_t(x[k].get());
-				int32_t r = int32_t(uint32_t(f) & (base - 1));
+				f += x[k].get_i64();
+				const uint32_t r1 = uint32_t(f) & (base - 1);
+				f >>= lbase;
+				int32_t r2 = int32_t(uint32_t(f) & (base - 1));
 				f >>= lbase;
 #if defined(BALANCED)
-				if (r >= int32_t(base / 2)) { r -= int32_t(base); f += 1; }
+				if (r2 >= int32_t(base / 2)) { r2 -= int32_t(base); f += 1; }
 #endif
-				x[k].set_int(r);
+				x[k] = RNS(r1) + RNS().set_i(r2) * rbase;
 			}
 			const size_t k = i * CARRY_LENGTH + CARRY_LENGTH - 1;
-			f += int64_t(x[k].get());
-			x[k].set_int(int32_t(f));	// -1 <= x_k <= base
+			f += x[k].get_i64();
+			const uint32_t r1 = uint32_t(f) & (base - 1);
+			const int32_t r2 = int32_t(f >> lbase);
+			x[k] = RNS(r1) + RNS().set_i(r2) * rbase;	// -1 <= x_k <= base
 		}
 	}
 
-	// b-1, b-1, ..., b-1, b + a, ... => b, 0, ..., 0, a, ...
+	// b-1, b-1, ..., b-1, b + a, ... => b, 0, ..., 0, a, ... 
 	void fix_base(RNS * const x, const char * const who)
 	{
 		const size_t n = size_t(1) << _ln;
-		const uint32_t base = (1u << _lbase);
+		const int lbase = _lbase;
+		const uint32_t base = 1u << lbase;
+		const int64_t base2 = int64_t(1) << (2 * lbase);
+		const RNS rbase2 = RNS(base) * RNS(base).toMonty();
+		const RNS rbase2_m1 = rbase2 - RNS(1);
+
 #if defined(CHECK_THEOREM)
 		static size_t i_max = 2;
 #else
 		(void)who;
 #endif
-		if (x[n - 1].get() == base - 1)
+		if (x[n - 1] == rbase2_m1)
 		{
-			size_t i = 2; for (; i < n; ++i) { if (x[n - i].get() != base - 1) break; }
+			size_t i = 2; for (; i < n; ++i) { if (x[n - i] != rbase2_m1) break; }
 #if defined(CHECK_THEOREM)
 			if (i > i_max) { i_max = i; std::cout << "fix_base " << who << ": i = " << i << " / " << n << std::endl; }
 #endif
-			if (x[n - i].get_int() >= int32_t(base))
+			if (x[n - i].get_i64() >= base2)
 			{
-				x[n - i] -= RNS(base);
-				for (size_t j = i - 1; j >= 2; --j) x[n - j] = RNS(0);
-				x[n - 1] = RNS(base);
+				x[n - i] -= rbase2;
+				for (size_t j = i - 1; j >= 2; --j) x[n - j] = RNS(0u);
+				x[n - 1] = rbase2;
 			}
 		}
 	}
@@ -618,31 +691,35 @@ private:
 	void lower(RNS * const x, const int32_t l0)
 	{
 		const size_t n = size_t(1) << _ln;
-		const uint32_t base = (1u << _lbase);
+		const int lbase = _lbase;
+		const uint32_t base = 1u << lbase;
+		const int64_t base2 = int64_t(1) << (2 * lbase);
+		const RNS rbase2 = RNS(base) * RNS(base).toMonty();
 
-		int32_t hi = x[n - 1].get_int();
-		if (hi >= int32_t(base))	// >= base^n
+		if (x[n - 1].get_i64() >= base2)	// >= base^n
 		{
 			// - R or Q
-			x[n - 1].set_int(hi - int32_t(base));
-			x[0].set_int(x[0].get_int() - l0);
+			x[n - 1] -= rbase2;
+			x[0] -= RNS().set_i(l0);
 		}
 	}
 
 	void positive(RNS * const x, const int32_t l0)
 	{
 		const size_t n = size_t(1) << _ln;
-		const uint32_t base = (1u << _lbase);
+		const int lbase = _lbase;
+		const uint32_t base = 1u << lbase;
+		const RNS rbase2 = RNS(base) * RNS(base).toMonty();
 
 		for (size_t i = 0; i < n; ++i)
 		{
-			const int32_t u = x[n - 1 - i].get_int();
+			const int64_t u = x[n - 1 - i].get_i64();
 			if (u > 0) return;
 			if (u < 0)
 			{
 				// + R or Q
-				x[n - 1].set_int(x[n - 1].get_int() + int32_t(base));
-				x[0].set_int(x[0].get_int() + l0);
+				x[n - 1] += rbase2;
+				x[0] += RNS().set_i(l0);
 				return;
 			}
 		}
@@ -660,34 +737,23 @@ private:
 
 #if defined(CHECK_THEOREM)
 		const size_t n = size_t(1) << _ln;
-		const int lbase = _lbase;
-		const double base = double(1u << _lbase);
 
 		double log_q = 0;
 		for (size_t i = 0; i < n; ++i)
 		{
 			const size_t j = n - 1 - i;
-			int32_t u = x[j].get_int();
+			int64_t u = x[j].get_i64();
 			if (u != 0)
 			{
-				if (u < 0)
-				{
 #if !defined(BALANCED)
-					throw std::runtime_error("Q_min < 0");
-#else
-					mpz_t t; mpz_init(t);
-					get_mpz(t, x);
-					if (mpz_sgn(t) < 0) throw std::runtime_error("Q_min < 0");
-					long ex; const double mx = mpz_get_d_2exp(&ex, t);
-					log_q = std::log2(mx) + ex;
-					mpz_clear(t);
+				if (u < 0) throw std::runtime_error("Q_min < 0");
 #endif
-				}
-				else
-				{
-					const double du = (j > 0) ? double(u) + x[j - 1].get_int() / base : double(u);
-					if (du != 0) log_q = std::log2(std::fabs(du)) + j * double(lbase);
-				}
+				mpz_t t; mpz_init(t);
+				get_mpz(t, x);
+				if (mpz_sgn(t) < 0) throw std::runtime_error("Q_min < 0");
+				long ex; const double mx = mpz_get_d_2exp(&ex, t);
+				log_q = std::log2(mx) + ex;
+				mpz_clear(t);
 				break;
 			}
 		}
@@ -715,7 +781,7 @@ private:
 		positive(x, -1);	// >= 0
 #endif
 
-		x[0].set_int(x[0].get_int() + 2);
+		x[0] += RNS(2);
 	}
 
 	// Modular arithmetic
@@ -834,12 +900,12 @@ public:
 	{
 		const size_t n = size_t(1) << _ln;
 
-		int32_t * const buf = new int32_t[n];
+		uint32_t * const buf = new uint32_t[4 * n];
 		for (size_t i = 0; i < 2; ++i)
 		{
-			if (!cfile.read(reinterpret_cast<char *>(buf), n * sizeof(int32_t))) { delete[] buf; return false; }
+			if (!cfile.read(reinterpret_cast<char *>(buf), 4 * n * sizeof(uint32_t))) { delete[] buf; return false; }
 			RNS * const reg = _reg[i];
-			for (size_t k = 0; k < n; ++k) reg[k].set_int(buf[k]);
+			for (size_t k = 0; k < n; ++k) reg[k] = RNS(buf[k + 0 * n], buf[k + 1 * n], buf[k + 2 * n], buf[k + 3 * n]);
 		}
 		delete[] buf;
 
@@ -850,12 +916,17 @@ public:
 	{
 		const size_t n = size_t(1) << _ln;
 
-		int32_t * const buf = new int32_t[n];
+		uint32_t * const buf = new uint32_t[4 * n];
 		for (size_t i = 0; i < 2; ++i)
 		{
 			const RNS * const reg = _reg[i];
-			for (size_t k = 0; k < n; ++k) buf[k] = reg[k].get_int();
-			if (!cfile.write(reinterpret_cast<const char *>(buf), n * sizeof(int32_t))) break;
+			for (size_t k = 0; k < n; ++k)
+			{
+				const RNS & r = reg[k];
+				buf[k + 0 * n] = r.get_r1(); buf[k + 1 * n] = r.get_r2();
+				buf[k + 2 * n] = r.get_r3(); buf[k + 3 * n] = r.get_r4();
+			}
+			if (!cfile.write(reinterpret_cast<const char *>(buf), 4 * n * sizeof(uint32_t))) break;
 		}
 		delete[] buf;
 	}
@@ -866,20 +937,22 @@ public:
 		mpz_t R, t; mpz_inits(_Nz, R, t, nullptr);
 
 		// R = base^n - 1, Q = base^n + 1 such that base^n > 16 * a * N and n is a power of two
-		const size_t m_2 = mpz_sizeinbase(N, 2) + size_t(32 - __builtin_clz(uint32_t(a))) + 4;
-		const uint64_t p_2a = (P1 * uint64_t(P2)) / 2 / uint32_t(a);
+		long e_n; const double m_n = mpz_get_d_2exp(&e_n, N);
+		const double log2_16aN = std::log2(16.0 * a) + std::log2(m_n) + e_n;
+
+		const double p_2a = ZP1::P() * double(ZP2::P()) * double(ZP3::P()) * double(ZP4::P()) / 2 / a;
 		int ln;
-		for (unsigned int lbase = 31; lbase >= 1; --lbase)
+		for (int lbase2 = 62; lbase2 >= 2; lbase2 -= 2)
 		{
-			// base is a power of two
-			const uint32_t base = (1u << lbase);
-			const size_t m = (m_2 + lbase - 1) / lbase;
-			ln = 4; while ((size_t(1) << ln) < m) ++ln;
-			// A necessary condition is a * n * (base - 1)^2 < (P1 * P2) / 2
-			if ((base - 1) * uint64_t(base - 1) < (p_2a >> ln))
+			// log2(base^n) = lbase * n
+			ln = 4; while (double(lbase2) * (1 << ln) < log2_16aN) ++ln;
+
+			// A necessary condition is a * n * (base - 1)^2 < Prod_i(Pi) / 2
+			const double dbase2 = double(uint64_t(1) << lbase2);
+			if ((1 << ln) * (dbase2 - 1) * (dbase2 - 1) < p_2a)
 			{
 				_ln = ln;
-				_lbase = int(lbase);
+				_lbase = lbase2 / 2;
 				break;
 			}
 		}
@@ -896,13 +969,13 @@ public:
 		_w_Q = new RNS[n]; _wi_Q = new RNS[n];
 		roots_Q(_w_Q, _wi_Q);
 
-		_carry = new int64_t[n / CARRY_LENGTH];
+		_carry = new __int128_t[n / CARRY_LENGTH];
 
 #if defined(CHECK_THEOREM)
 		long eN; const double mN = mpz_get_d_2exp(&eN, N);
 		_logN = std::log2(mN) + eN;
 #endif
-		mpz_set_ui(R, 1); mpz_mul_2exp(R, R, lbase << ln); mpz_sub_ui(R, R, 1);
+		mpz_set_ui(R, 1); mpz_mul_2exp(R, R, (2 * lbase) << ln); mpz_sub_ui(R, R, 1);
 		if (mpz_invert(t, N, R) == 0)
 		{
 			mpz_gcd(_Nz, N, R);
@@ -919,7 +992,6 @@ public:
 			NTT_forward(_Ninv_R, _w_R);
 		}
 #if defined(CHECK_THEOREM)
-		long e_n; const double m_n = mpz_get_d_2exp(&e_n, N);
 		long e_r; const double m_r = mpz_get_d_2exp(&e_r, R);
 		std::cout << "N = " << m_n << " * 2^" << e_n << ", R = 2^" << e_r << " - 1, N/R = " << m_n / m_r << " * 2^" << e_n - e_r << std::endl;
 #endif
@@ -957,7 +1029,7 @@ public:
 	std::string get_info_short() const override
 	{
 		const size_t n = size_t(1) << _ln;
-		std::ostringstream ss; ss << "length " << n << "x" << _lbase << " bits";
+		std::ostringstream ss; ss << "length " << n << "x2x" << _lbase << " bits";
 		return (ss.str());
 	}
 

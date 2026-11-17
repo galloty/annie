@@ -26,7 +26,6 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define Q2				218103809u
 #define RSQ2			3444438393u
 #define INVP2_P1		1797558821u
-#define P1P2			17099604843443519489ul
 #define NORM1			4194176001u
 #define NORM2			4076739073u
 #define CARRY_LENGTH	4u
@@ -43,7 +42,6 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define CHUNK64			8
 #define CHUNK512		4
 #endif
-#define BASE			(1u << LBASE)
 
 typedef uint	sz_t;
 typedef uint	uint_32;
@@ -1036,6 +1034,9 @@ void fwd2048(__global ZP * restrict const regm, const uint_32 reg_x, const uint_
 #endif
 
 // --- carry ---
+
+#define BASE	(1u << LBASE)
+#define P1P2	(P1 * (uint_64)(P2))
 
 // Chinese remainder theorem
 INLINE int_64 garner2(const ZP r1, const ZP r2)

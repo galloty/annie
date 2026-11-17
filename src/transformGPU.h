@@ -18,35 +18,44 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define finline	__attribute__((always_inline))
 
 // The prime finite field Z/PZ
-template<uint32 P, uint32 Q, uint32 MR, uint32 RSQ, uint32 MPR>
+template<uint32 _P, uint32 _PRIM_ROOT>
 class ZPT : public ZP
 {
 private:
-	finline static uint32 _add(const uint32 a, const uint32 b) { return a + b - ((a >= P - b) ? P : 0); }
-	finline static uint32 _sub(const uint32 a, const uint32 b) { return a - b + ((a < b) ? P : 0); }
+	// p * q = 1 (mod 2^32) (Newton's method)
+	finline static constexpr uint32 _invert(const uint32 p)
+	{
+		uint32 q = 1, prev = 0;
+		while (q != prev) { prev = q; q *= 2 - p * q; }
+		return q;
+	}
+
+	static const uint32 _Q = _invert(_P);
+
+	finline static uint32 _add(const uint32 a, const uint32 b) { return a + b - ((a >= _P - b) ? _P : 0); }
+	finline static uint32 _sub(const uint32 a, const uint32 b) { return a - b + ((a < b) ? _P : 0); }
 
 	// Montgomery multiplication: 2 mul + 2 mul_hi
 	finline static uint32 _mul(const uint32 a, const uint32 b)
 	{
 		const uint64 t = a * uint64(b);
 		const uint32 lo = uint32(t), hi = uint32(t >> 32);
-		const uint32 mp = uint32(((lo * Q) * uint64(P)) >> 32);
+		const uint32 mp = uint32(((lo * _Q) * uint64(_P)) >> 32);
 		return _sub(hi, mp);
 	}
 
-	static ZPT one() { return ZPT(MR); }
-
-	// Conversion into / out of Montgomery form
-	ZPT toMonty() const { return ZPT(_mul(_n, RSQ)); }
-	// ZPT fromMonty() const { return ZPT(_mul(_n, 1)); }
+	// 2^32 mod p = Montgomery form of 1
+	static const uint32 _one = uint32((uint64(1) << 32) % _P);
+	// (2^32)^2 mod p
+	static const uint32 _rsq = uint32((uint64(_one) * _one) % _P);
 
 	ZPT & operator*=(const ZPT & rhs) { _n = _mul(_n, rhs._n); return *this; }
 	ZPT operator*(const ZPT & rhs) const { ZPT r = *this; r *= rhs; return r; }
 
 	ZPT pow(const uint64 e) const
 	{
-		if (e == 0) return ZPT(MR);
-		ZPT r = ZPT(MR), y = *this;
+		if (e == 0) return one();
+		ZPT r = one(), y = *this;
 		for (uint64 i = e; i > 1; i /= 2)
 		{
 			if (i % 2 != 0) r *= y;
@@ -56,8 +65,7 @@ private:
 		return r;
 	}
 
-	ZPT invert() const { return pow(P - 2); }
-	static ZPT primroot_n(const int ln) { return ZPT(MPR).pow((P - 1) >> ln); }
+	static ZPT primroot_n(const int ln) { return ZPT(_PRIM_ROOT).toMonty().pow((_P - 1) >> ln); }
 
 	static constexpr size_t bitrev(const size_t i, const size_t n)
 	{
@@ -71,9 +79,21 @@ public:
 	explicit ZPT(const ZP & n) : ZP(n) {}
 	explicit ZPT(const uint32 n) : ZP(n) {}
 
-	int32 get_int() const { return int32(_n - ((_n >= P / 2) ? P : 0)); }
+	static uint32 P() { return _P; }
+	static uint32 Q() { return _Q; }
 
-	static ZPT norm(const int ln) { return ZPT(P - ((P - 1) >> ln)); }
+	static ZPT one() { return ZPT(_one); }
+	static ZPT rsq() { return ZPT(_rsq); }
+
+	int32 get_int() const { return int32(_n - ((_n >= _P / 2) ? _P : 0)); }
+
+	static ZPT norm(const int ln) { return ZPT(_P - ((_P - 1) >> ln)); }
+
+	// Conversion into / out of Montgomery form
+	ZPT toMonty() const { return ZPT(_mul(_n, _rsq)); }
+	// ZPT fromMonty() const { return ZPT(_mul(_n, 1)); }
+
+	ZPT invert() const { return pow(_P - 2); }
 
 	// modulo x^n - 1
 	static void set_roots_R(ZP * const w_R, ZP * const wi_R, const int ln)
@@ -122,22 +142,8 @@ public:
 	}
 };
 
-#define P1			(125 * (1u << 25) + 1)
-#define	Q1			100663297u		// p * q = 1 (mod 2^32)
-#define	MR1			100663295u		// 2^32 mod p = Montgomery form of 1
-#define	RSQ1		232465106u		// (2^32)^2 mod p
-#define	MPR1		301989885u		// Montgomery form of the primitive root 3
-
-#define P2			(243 * (1u << 24) + 1)
-#define	Q2			218103809u
-#define	MR2			218103807u
-#define	RSQ2		3444438393u
-#define	MPR2		1526726649u		// MF of the primitive root 7
-
-#define	INVP2_P1	1797558821u		// Montgomery form of 1 / P2 (mod P1)
-
-using ZP1 = ZPT<P1, Q1, MR1, RSQ1, MPR1>;
-using ZP2 = ZPT<P2, Q2, MR2, RSQ2, MPR2>;
+using ZP1 = ZPT<(125u << 25) + 1, 3>;
+using ZP2 = ZPT<(243u << 24) + 1, 7>;
 
 template<int LN>
 class transformGPU : public transform
@@ -429,17 +435,15 @@ public:
 		src << "#define N_SZ\t" << n << "u" << std::endl;
 		src << "#define LBASE\t" << lbase << std::endl;
 
-		src << "#define P1\t" << P1 << "u" << std::endl;
-		src << "#define Q1\t" << Q1 << "u" << std::endl;
-		src << "#define RSQ1\t" << RSQ1 << "u" << std::endl;
+		src << "#define P1\t" << ZP1::P() << "u" << std::endl;
+		src << "#define Q1\t" << ZP1::Q() << "u" << std::endl;
+		src << "#define RSQ1\t" << ZP1::rsq().get() << "u" << std::endl;
 
-		src << "#define P2\t" << P2 << "u" << std::endl;
-		src << "#define Q2\t" << Q2 << "u" << std::endl;
-		src << "#define RSQ2\t" << RSQ2 << "u" << std::endl;
+		src << "#define P2\t" << ZP2::P() << "u" << std::endl;
+		src << "#define Q2\t" << ZP2::Q() << "u" << std::endl;
+		src << "#define RSQ2\t" << ZP2::rsq().get() << "u" << std::endl;
 
-		src << "#define INVP2_P1\t" << INVP2_P1 << "u" << std::endl;
-
-		src << "#define P1P2\t" << (P1 * uint64(P2)) << "ul" << std::endl;
+		src << "#define INVP2_P1\t" << ZP1(ZP2::P()).toMonty().invert().get() << "u" << std::endl;
 
 		// Not converted into Montgomery form such that output is converted out of MF
 		src << "#define NORM1\t" << ZP1::norm(LN - 1).get() << "u" << std::endl;
@@ -539,6 +543,7 @@ public:
 
 inline transform * create_transformGPU(const mpz_t & N, const int32_t a, const size_t device_id)
 {
+	const uint64 p1p2_2 = (ZP1::P() * uint64(ZP2::P())) / 2;
 	// R = base^n - 1, Q = base^n + 1 such that base^n > 16 * a * N and n is a power of two
 	const size_t m_2 = mpz_sizeinbase(N, 2) + size_t(32 - __builtin_clz((unsigned int)(a))) + 4;
 	int ln, lbase;
@@ -550,7 +555,7 @@ inline transform * create_transformGPU(const mpz_t & N, const int32_t a, const s
 		ln = 4; while ((size_t(1) << ln) < m) ++ln;
 		// A necessary condition is a * n * base^2 < (P1 * P2) / 2
 		const double dbase = double(base);
-		if (double(size_t(a) << ln) * dbase * dbase < (P1 * uint64(P2)) / 2) break;
+		if (double(size_t(a) << ln) * dbase * dbase < p1p2_2) break;
 	}
 
 #if defined(QUICK_TEST)

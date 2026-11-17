@@ -22,6 +22,12 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include "file.h"
 #include "timer.h"
 
+#if defined(QUICK_TEST)
+#define GMP_THRESHOLD	80
+#else
+#define GMP_THRESHOLD	10000
+#endif
+
 class annie
 {
 public:
@@ -50,8 +56,6 @@ protected:
 	}
 
 public:
-	// static size_t display_devices() { /*return itransform::display_devices();*/ }
-
 	void quit()
 	{
 		std::atomic_thread_fence(std::memory_order_release);
@@ -245,7 +249,7 @@ public:
 			print(ss.str());
 		}
 
-		transform * const p_transform = (nsize < 10000) ? dynamic_cast<transform *>(new transformGMP(n, a)) : create_transformGPU(n, a, device);
+		transform * const p_transform = (nsize < GMP_THRESHOLD) ? dynamic_cast<transform *>(new transformGMP(n, a)) : create_transformGPU(n, a, device);	// new transformCPU(n, a);
 		if (p_transform->init_failed())
 		{
 			if (verbose)
@@ -424,7 +428,7 @@ public:
 		{
 			mpz_set_ui(n, 3); mpz_mul_2exp(n, n, e); mpz_add_ui(n, n, 1);
 
-			transform * const p_transform = create_transformGPU(n, 3, device);
+			transform * const p_transform = create_transformGPU(n, 3, device);	// new transformCPU(n, 3);
 
 			if (first)
 			{

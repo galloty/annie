@@ -38,7 +38,6 @@ static const char * const src_ocl_kernel = \
 "#define Q2				218103809u\n" \
 "#define RSQ2			3444438393u\n" \
 "#define INVP2_P1		1797558821u\n" \
-"#define P1P2			17099604843443519489ul\n" \
 "#define NORM1			4194176001u\n" \
 "#define NORM2			4076739073u\n" \
 "#define CARRY_LENGTH	4u\n" \
@@ -55,7 +54,6 @@ static const char * const src_ocl_kernel = \
 "#define CHUNK64			8\n" \
 "#define CHUNK512		4\n" \
 "#endif\n" \
-"#define BASE			(1u << LBASE)\n" \
 "\n" \
 "typedef uint	sz_t;\n" \
 "typedef uint	uint_32;\n" \
@@ -1048,6 +1046,9 @@ static const char * const src_ocl_kernel = \
 "#endif\n" \
 "\n" \
 "// --- carry ---\n" \
+"\n" \
+"#define BASE	(1u << LBASE)\n" \
+"#define P1P2	(P1 * (uint_64)(P2))\n" \
 "\n" \
 "// Chinese remainder theorem\n" \
 "INLINE int_64 garner2(const ZP r1, const ZP r2)\n" \
