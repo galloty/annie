@@ -3,7 +3,9 @@ Search for any prime number
 
 ## About
 
-**annie** is a an [OpenCL™](https://www.khronos.org/opencl/) application on GPU.  
+![Developed By a Human Not By AI](Developed-By-a-Human-Not-By-AI-Badge-white.png)
+
+**annie** is a an [OpenCL™](https://www.khronos.org/opencl/) application on GPU.
 
 It performs a fast probable primality test for any number using an [Euler test](https://en.wikipedia.org/wiki/Euler%E2%80%93Jacobi_pseudoprime).  
 *a* is chosen such that Euler's criterion yields -1: it is the condition of [Proth's theorem](https://en.wikipedia.org/wiki/Proth%27s_theorem).
