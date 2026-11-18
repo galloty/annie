@@ -3,7 +3,9 @@ Search for any prime number
 
 ## About
 
-![Developed By a Human Not By AI](Developed-By-a-Human-Not-By-AI-Badge-white.png)
+<p align="left">
+	<img width="25%" src="Developed-By-a-Human-Not-By-AI-Badge-white.svg">
+</p>
 
 **annie** is a an [OpenCL™](https://www.khronos.org/opencl/) application on GPU.
 
