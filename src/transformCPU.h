@@ -16,6 +16,35 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define BALANCED		true
 #define CARRY_LENGTH	4u
 
+class int_128
+{
+private:
+	__int128_t	_n;
+
+	explicit int_128(const __int128_t n) : _n(n) {}
+
+public:
+	int_128() {};
+	explicit int_128(const uint32_t n) : _n(__int128_t(n)) {}
+	explicit int_128(const uint64_t n) : _n(__int128_t(n)) {}
+
+	int32_t get_i32() const { return int32_t(_n); }
+	uint32_t get_u32() const { return uint32_t(_n); }
+
+	int_128 operator-() const { return int_128(-_n); }
+
+	int_128 & operator+=(const int_128 & rhs) { _n += rhs._n; return *this; }
+	int_128 & operator+=(const int32_t & rhs) { _n += rhs; return *this; }
+	int_128 & operator+=(const int64_t & rhs) { _n += rhs; return *this; }
+	int_128 & operator-=(const int64_t & rhs) { _n -= rhs; return *this; }
+
+	int_128 & operator>>=(const int & rhs) { _n >>= rhs; return *this; }
+
+	int_128 operator+(const int_128 & rhs) const { return int_128(_n + rhs._n); }
+	int_128 operator*(const int32_t & rhs) const { return int_128(_n * rhs); }
+	int_128 operator*(const int64_t & rhs) const { return int_128(_n * rhs); }
+};
+
 // The prime finite field Z/PZ
 template<uint32_t _P, uint32_t _PRIM_ROOT>
 class ZPT
@@ -129,7 +158,7 @@ private:
 		return int64_t(r2) + int64_t(P2) * r1s;
 	}
 
-	__int128_t garner4() const
+	int_128 garner4() const
 	{
 		static const uint32_t P1 = ZP1::P(), P2 = ZP2::P(), P3 = ZP3::P(), P4 = ZP4::P();
 		// we must have P4 < P3 < P2 < P1
@@ -150,7 +179,7 @@ private:
 
 		const uint64_t r34 = r4 + uint64_t(P4) * r3;
 		const int64_t r12s = int64_t(r2) + int64_t(P2) * r1s;
-		return __int128_t(r34) + __int128_t(P34) * r12s;
+		return int_128(r34) + int_128(P34) * r12s;
 	}
 
 public:
@@ -166,7 +195,7 @@ public:
 	uint32_t get_r4() const { return _r4.get(); }
 
 	int64_t get_i64() const { return garner2(); }
-	__int128_t get_i128() const { return garner4(); }
+	int_128 get_i128() const { return garner4(); }
 
 	RNS & set_i(const int32_t i) { _r1.set_i(i); _r2.set_i(i); _r3.set_i(i); _r4.set_i(i); return *this; }
 
@@ -202,7 +231,7 @@ private:
 	RNS * _t_Q = nullptr; RNS * _t = nullptr;
 	RNS * _reg[reg_count];
 	RNS * _w_R; RNS * _wi_R; RNS * _w_Q; RNS * _wi_Q;
-	__int128_t * _carry;
+	int_128 * _carry;
 #if defined(CHECK_THEOREM)
 	double _logq_min = 1e100, _logq_max = -1e100, _logN = 0;
 #endif
@@ -646,7 +675,7 @@ private:
 		else if (s0 == n / 2) mul2x4(y, x, w, n / 8);
 	}
 
-	void carry_mul_sub(RNS * const x, const RNS * const y, __int128_t * const carry, const int32_t a)
+	void carry_mul_sub(RNS * const x, const RNS * const y, int_128 * const carry, const int32_t a)
 	{
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
@@ -656,16 +685,16 @@ private:
 	
 		for (size_t i = 0; i < n / CARRY_LENGTH; ++i)
 		{
-			__int128_t f = 0;
+			int_128 f = int_128(0u);
 			for (size_t j = 0; j < CARRY_LENGTH; ++j)
 			{
 				const size_t k = i * CARRY_LENGTH + j;
 				// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF
-				f += a * (x[k] * norm).get_i128();
+				f += (x[k] * norm).get_i128() * a;
 				if (y != nullptr) f -= y[k].get_i64();
-				const uint32_t r1 = uint32_t(f) & (base - 1);
+				const uint32_t r1 = f.get_u32() & (base - 1);
 				f >>= lbase;
-				const uint32_t r2 = uint32_t(f) & (base - 1);
+				const uint32_t r2 = f.get_u32() & (base - 1);
 				f >>= lbase;
 				x[k] = RNS(r1) + RNS(r2) * rbase;
 			}
@@ -673,7 +702,7 @@ private:
 		}
 	}
 
-	void carry_complete(RNS * const x, __int128_t * const carry, const bool nega)
+	void carry_complete(RNS * const x, int_128 * const carry, const bool nega)
 	{
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
@@ -682,16 +711,16 @@ private:
 
 		for (size_t i = 0; i < n / CARRY_LENGTH; ++i)
 		{
-			__int128_t f = carry[((i == 0) ? (n / CARRY_LENGTH) : i) - 1];
+			int_128 f = carry[((i == 0) ? (n / CARRY_LENGTH) : i) - 1];
 			if ((i == 0) && nega) f = -f;
 
 			for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)
 			{
 				const size_t k = i * CARRY_LENGTH + j;
 				f += x[k].get_i64();
-				const uint32_t r1 = uint32_t(f) & (base - 1);
+				const uint32_t r1 = f.get_u32() & (base - 1);
 				f >>= lbase;
-				int32_t r2 = int32_t(uint32_t(f) & (base - 1));
+				int32_t r2 = int32_t(f.get_u32() & (base - 1));
 				f >>= lbase;
 #if defined(BALANCED)
 				if (r2 >= int32_t(base / 2)) { r2 -= int32_t(base); f += 1; }
@@ -700,8 +729,9 @@ private:
 			}
 			const size_t k = i * CARRY_LENGTH + CARRY_LENGTH - 1;
 			f += x[k].get_i64();
-			const uint32_t r1 = uint32_t(f) & (base - 1);
-			const int32_t r2 = int32_t(f >> lbase);
+			const uint32_t r1 = f.get_u32() & (base - 1);
+			f >>= lbase;
+			const int32_t r2 = f.get_i32();
 			x[k] = RNS(r1) + RNS().set_i(r2) * rbase;	// -1 <= x_k <= base
 		}
 	}
@@ -1017,7 +1047,7 @@ public:
 		_w_Q = new RNS[n]; _wi_Q = new RNS[n];
 		roots_Q(_w_Q, _wi_Q);
 
-		_carry = new __int128_t[n / CARRY_LENGTH];
+		_carry = new int_128[n / CARRY_LENGTH];
 
 #if defined(CHECK_THEOREM)
 		long eN; const double mN = mpz_get_d_2exp(&eN, N);

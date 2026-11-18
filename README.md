@@ -4,7 +4,7 @@ Search for any prime number
 ## About
 
 <p align="left">
-	<img width="25%" src="Developed-By-a-Human-Not-By-AI-Badge-white.svg">
+	<img width="20%" src="Developed-By-a-Human-Not-By-AI-Badge-black.svg">
 </p>
 
 **annie** is a an [OpenCL™](https://www.khronos.org/opencl/) application on GPU.
