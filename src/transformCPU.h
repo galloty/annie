@@ -16,33 +16,75 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define BALANCED		true
 #define CARRY_LENGTH	4u
 
+static uint64_t mul_hi(const uint64_t x, const uint64_t y) { return uint64_t((x * __int128_t(y)) >> 64); }
+
 class int_128
 {
 private:
-	__int128_t	_n;
-
-	explicit int_128(const __int128_t n) : _n(n) {}
+	uint64_t _l;
+	int64_t _h;
+	explicit int_128(const uint64_t l, const int64_t h) : _l(l), _h(h) {}
 
 public:
 	int_128() {};
-	explicit int_128(const uint32_t n) : _n(__int128_t(n)) {}
-	explicit int_128(const uint64_t n) : _n(__int128_t(n)) {}
+	explicit int_128(const uint32_t n) : _l(n), _h(0) {}
+	explicit int_128(const uint64_t n) : _l(n), _h(0) {}
+	explicit int_128(const int64_t n) : _l(uint64_t(n)), _h((n < 0) ? -1 : 0) {}
 
-	int32_t get_i32() const { return int32_t(_n); }
-	uint32_t get_u32() const { return uint32_t(_n); }
+	int32_t get_i32() const { return int32_t(_l); }
+	uint32_t get_u32() const { return uint32_t(_l); }
 
-	int_128 operator-() const { return int_128(-_n); }
+	int_128 operator-() const { return int_128(-_l, -_h - ((_l != 0) ? 1 : 0)); }
 
-	int_128 & operator+=(const int_128 & rhs) { _n += rhs._n; return *this; }
-	int_128 & operator+=(const int32_t & rhs) { _n += rhs; return *this; }
-	int_128 & operator+=(const int64_t & rhs) { _n += rhs; return *this; }
-	int_128 & operator-=(const int64_t & rhs) { _n -= rhs; return *this; }
+	int_128 & operator+=(const int_128 & rhs)
+	{
+		_l += rhs._l; _h += rhs._h + ((_l < rhs._l) ? 1 : 0);
+		return *this;
+	}
 
-	int_128 & operator>>=(const int & rhs) { _n >>= rhs; return *this; }
+	int_128 & operator+=(const int32_t & rhs)
+	{
+		const uint64_t rl = uint64_t(rhs); const int64_t rh = (rhs < 0) ? -1 : 0;
+		_l += rl; _h += rh + ((_l < rl) ? 1 : 0);
+		return *this;
+	}
 
-	int_128 operator+(const int_128 & rhs) const { return int_128(_n + rhs._n); }
-	int_128 operator*(const int32_t & rhs) const { return int_128(_n * rhs); }
-	int_128 operator*(const int64_t & rhs) const { return int_128(_n * rhs); }
+	int_128 & operator+=(const int64_t & rhs)
+	{
+		const uint64_t rl = uint64_t(rhs); const int64_t rh = (rhs < 0) ? -1 : 0;
+		_l += rl; _h += rh + ((_l < rl) ? 1 : 0);
+		return *this;
+	}
+
+	int_128 & operator-=(const int64_t & rhs)
+	{
+		const uint64_t rl = uint64_t(rhs); const int64_t rh = (rhs < 0) ? -1 : 0;
+		_h -= rh + ((_l < rl) ? 1 : 0); _l -= rl;
+		return *this;
+	}
+
+	int_128 & operator>>=(const int & s)	// s != 0
+	{
+		_l = (_l >> s) | uint64_t(_h << (64 - s));
+		_h >>= s;
+		return *this;
+	}
+
+	int_128 operator+(const int_128 & rhs) const
+	{
+		const uint64_t l = _l + rhs._l;
+		return int_128(l, _h + rhs._h + ((l < _l) ? 1 : 0));
+	}
+
+	int_128 operator*(const uint32_t & rhs) const
+	{
+		return int_128(_l * rhs, _h * int64_t(rhs) + int64_t(mul_hi(_l, rhs)));
+	}
+
+	int_128 operator*(const uint64_t & rhs) const
+	{
+		return int_128(_l * rhs, _h * int64_t(rhs) + int64_t(mul_hi(_l, rhs)));
+	}
 };
 
 // The prime finite field Z/PZ
@@ -179,7 +221,7 @@ private:
 
 		const uint64_t r34 = r4 + uint64_t(P4) * r3;
 		const int64_t r12s = int64_t(r2) + int64_t(P2) * r1s;
-		return int_128(r34) + int_128(P34) * r12s;
+		return int_128(r34) + int_128(r12s) * P34;
 	}
 
 public:
@@ -675,7 +717,7 @@ private:
 		else if (s0 == n / 2) mul2x4(y, x, w, n / 8);
 	}
 
-	void carry_mul_sub(RNS * const x, const RNS * const y, int_128 * const carry, const int32_t a)
+	void carry_mul_sub(RNS * const x, const RNS * const y, int_128 * const carry, const uint32_t a)
 	{
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
@@ -864,7 +906,7 @@ private:
 
 	// Modular arithmetic
 
-	void square_mul_mod_R(RNS * const y, const RNS * const x, const int32_t a)
+	void square_mul_mod_R(RNS * const y, const RNS * const x, const uint32_t a)
 	{
 		set(y, x); const size_t s0 = NTT_forward8(y, _w_R);
 		square(y, _w_R, _wi_R, s0);
@@ -873,7 +915,7 @@ private:
 		carry_complete(y, _carry, false);
 	}
 
-	void square_mul_mod_Q(RNS * const y, const RNS * const x, const int32_t a)
+	void square_mul_mod_Q(RNS * const y, const RNS * const x, const uint32_t a)
 	{
 		set(y, x); const size_t s0 = NTT_forward8(y, _w_Q);
 		square(y, _w_Q, _wi_Q, s0);
@@ -929,7 +971,7 @@ private:
 		reduceMMGW(x);
 	}
 
-	void squareMMGW(RNS * const x, const int32_t a)
+	void squareMMGW(RNS * const x, const uint32_t a)
 	{
 		square_mul_mod_Q(_t_Q, x, a);
 		square_mul_mod_R(x, x, a);
@@ -961,7 +1003,7 @@ public:
 
 	void square_mul(const int32_t a) override
 	{
-		squareMMGW(_reg[Reg0], a);
+		squareMMGW(_reg[Reg0], uint32_t(a));
 	}
 
 	void mul(const size_t dst, const size_t src) override
