@@ -239,7 +239,7 @@ public:
 
 	RNS & set_i(const int_32 i) { _r1.set_i(i); _r2.set_i(i); _r3.set_i(i); _r4.set_i(i); return *this; }
 
-	// Conversion into / out of Montgomery form
+	// Conversion into Montgomery form
 	RNS toMonty() const { return RNS(_r1.toMonty(), _r2.toMonty(), _r3.toMonty(), _r4.toMonty()); }
 
 	bool operator==(const RNS & rhs) const { return (_r1 == rhs._r1) && (_r2 == rhs._r2) && (_r3 == rhs._r3) && (_r4 == rhs._r4); }
@@ -263,6 +263,8 @@ public:
 	RNS invert() const { return RNS(_r1.invert(), _r2.invert(), _r3.invert(), _r4.invert()); }
 	static RNS primroot_n(const int ln) { return RNS(ZP1::primroot_n(ln), ZP2::primroot_n(ln), ZP3::primroot_n(ln), ZP4::primroot_n(ln)); }
 	static RNS norm(const int ln) { return RNS(ZP1::norm(ln), ZP2::norm(ln), ZP3::norm(ln), ZP4::norm(ln)); }
+
+	// void display() const { std::cout << "(" << _r1.get() << ", " << _r2.get() << ", " << _r3.get() << ", " << _r4.get() << ")"; }
 };
 
 class transformCPU : public transform
@@ -271,6 +273,7 @@ private:
 	static const size_t reg_count = 3;
 	int _ln = 0;
 	int _lbase = 0;
+	RNS _rbase, _rbase2;
 	bool _init_failed = false;
 	RNS _norm;
 	mpz_t _Nz;
@@ -664,7 +667,7 @@ private:
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
 		const uint_32 base = 1u << lbase;
-		const RNS rbase = RNS(base).toMonty();
+		const RNS rbase = _rbase;
 
 		const size_t x_size = mpz_size(x);
 		const mp_limb_t * const x_ptr = mpz_limbs_read(x);
@@ -830,11 +833,9 @@ private:
 	void fix_base(RNS * const x, const char * const who)
 	{
 		const size_t n = size_t(1) << _ln;
-		const int lbase = _lbase;
-		const uint_32 base = 1u << lbase;
-		const int_64 base2 = int_64(1) << (2 * lbase);
-		const RNS rbase2 = RNS(base) * RNS(base).toMonty();
-		const RNS rbase2_m1 = rbase2 - RNS(1);
+		const int lbase = _lbase, lbase2 = 2 * lbase;
+		const int_64 base2 = int_64(1) << lbase2;
+		const RNS rbase2 = _rbase2, rbase2_m1 = rbase2 - RNS(1);
 
 #if defined(CHECK_THEOREM)
 		static size_t i_max = 2;
@@ -859,15 +860,13 @@ private:
 	void lower(RNS * const x, const int_32 l0)
 	{
 		const size_t n = size_t(1) << _ln;
-		const int lbase = _lbase;
-		const uint_32 base = 1u << lbase;
-		const int_64 base2 = int_64(1) << (2 * lbase);
-		const RNS rbase2 = RNS(base) * RNS(base).toMonty();
+		const int lbase = _lbase, lbase2 = 2 * lbase;
+		const int_64 base2 = int_64(1) << lbase2;
 
 		if (x[n - 1].get_i64() >= base2)	// >= base^n
 		{
 			// - R or Q
-			x[n - 1] -= rbase2;
+			x[n - 1] -= _rbase2;
 			x[0] -= RNS().set_i(l0);
 		}
 	}
@@ -875,9 +874,6 @@ private:
 	void positive(RNS * const x, const int_32 l0)
 	{
 		const size_t n = size_t(1) << _ln;
-		const int lbase = _lbase;
-		const uint_32 base = 1u << lbase;
-		const RNS rbase2 = RNS(base) * RNS(base).toMonty();
 
 		for (size_t i = 0; i < n; ++i)
 		{
@@ -886,7 +882,7 @@ private:
 			if (u < 0)
 			{
 				// + R or Q
-				x[n - 1] += rbase2;
+				x[n - 1] += _rbase2;
 				x[0] += RNS().set_i(l0);
 				return;
 			}
@@ -953,6 +949,14 @@ private:
 	}
 
 	// Modular arithmetic
+
+	// void display(const RNS * const x, const char * const str) const
+	// {
+	// 	const size_t n = size_t(1) << _ln;
+	// 	std::cout << str << ": ";
+	// 	for (size_t i = 0; i < n; ++i) x[i].display();
+	// 	std::cout << std::endl;
+	// }
 
 	void square_mul_mod_R(RNS * const y, const RNS * const x, const uint_32 a)
 	{
@@ -1124,9 +1128,12 @@ public:
 				break;
 			}
 		}
-		_norm = RNS::norm(ln - 1);
 		const size_t n = size_t(1) << ln;
-		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase);
+		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase), lbase2 = 2 * lbase;
+		const RNS base = RNS(1u << lbase);
+		_rbase = base.toMonty();
+		_rbase2 = base * _rbase;
+		_norm = RNS::norm(ln - 1);
 
 		_N_Q = new RNS[n]; _Ninv_R = new RNS[n]; _one = new RNS[n];
 		_t_Q = new RNS[n];  _t = new RNS[n];
@@ -1143,7 +1150,7 @@ public:
 		long eN; const double mN = mpz_get_d_2exp(&eN, N);
 		_logN = std::log2(mN) + eN;
 #endif
-		mpz_set_ui(R, 1); mpz_mul_2exp(R, R, (2 * lbase) << ln); mpz_sub_ui(R, R, 1);
+		mpz_set_ui(R, 1); mpz_mul_2exp(R, R, lbase2 << ln); mpz_sub_ui(R, R, 1);
 		if (mpz_invert(t, N, R) == 0)
 		{
 			mpz_gcd(_Nz, N, R);
