@@ -8,6 +8,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #pragma once
 
 #include <cstdint>
+#include <cmath>
 
 #include <gmp.h>
 
@@ -16,117 +17,111 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define BALANCED		true
 #define CARRY_LENGTH	4u
 
-static uint64_t mul_hi(const uint64_t x, const uint64_t y) { return uint64_t((x * __int128_t(y)) >> 64); }
+typedef uint32_t	uint_32;
+typedef int32_t		int_32;
+typedef uint64_t	uint_64;
+typedef int64_t		int_64;
 
-class int_128
+static uint_32 mul_hi(const uint_32 x, const uint_32 y) { return uint_32((x * uint_64(y)) >> 32); }
+static uint_64 mul_hi(const uint_64 x, const uint_64 y) { return uint_64((x * __int128_t(y)) >> 64); }
+
+// 128-bit arithmetic
+
+typedef struct { uint_64 s0; int_64 s1; } int_128;
+
+static int_128 int128_set(const uint_64 l, const int_64 h) { int_128 r; r.s0 = l; r.s1 = h; return r; }
+
+static int_128 int128_neg(const int_128 x) { int_128 r; r.s0 = -x.s0; r.s1 = -x.s1 - ((x.s0 != 0) ? 1 : 0); return r; }
+
+static int_128 int128_add(const int_128 x, const int_128 y)
 {
-private:
-	uint64_t _l;
-	int64_t _h;
-	explicit int_128(const uint64_t l, const int64_t h) : _l(l), _h(h) {}
+	int_128 r;
+	r.s0 = x.s0 + y.s0;
+	r.s1 = x.s1 + y.s1 + ((r.s0 < x.s0) ? 1 : 0);
+	return r;
+}
 
-public:
-	int_128() {};
-	explicit int_128(const uint32_t n) : _l(n), _h(0) {}
-	explicit int_128(const uint64_t n) : _l(n), _h(0) {}
-	explicit int_128(const int64_t n) : _l(uint64_t(n)), _h((n < 0) ? -1 : 0) {}
+static int_128 int128_add_u64(const int_128 x, const uint_64 y)
+{
+	int_128 r;
+	r.s0 = x.s0 + y;
+	r.s1 = x.s1 + ((r.s0 < x.s0) ? 1 : 0);
+	return r;
+}
 
-	int32_t get_i32() const { return int32_t(_l); }
-	uint32_t get_u32() const { return uint32_t(_l); }
+static int_128 int128_sub_i64(const int_128 x, const int_64 y)
+{
+	int_128 r;
+	r.s0 = x.s0 - (uint_64)(y);
+	r.s1 = x.s1 - ((y < 0) ? -1 : 0) - ((x.s0 < (uint_64)(y)) ? 1 : 0);
+	return r;
+}
 
-	int_128 operator-() const { return int_128(-_l, -_h - ((_l != 0) ? 1 : 0)); }
+static int_128 int128_rshift(const int_128 x, const int s)	// s != 0
+{
+	int_128 r;
+	r.s0 = (x.s0 >> s) | (uint_64)(x.s1 << (64 - s));
+	r.s1 = x.s1 >> s;
+	return r;
+}
 
-	int_128 & operator+=(const int_128 & rhs)
-	{
-		_l += rhs._l; _h += rhs._h + ((_l < rhs._l) ? 1 : 0);
-		return *this;
-	}
+static int_128 int128_mul_u32(const int_128 x, const uint_32 y)
+{
+	int_128 r;
+	r.s0 = x.s0 * y;
+	r.s1 = x.s1 * (int_64)(y) + (int_64)(mul_hi(x.s0, (uint_64)(y)));
+	return r;
+}
 
-	int_128 & operator+=(const int32_t & rhs)
-	{
-		const uint64_t rl = uint64_t(rhs); const int64_t rh = (rhs < 0) ? -1 : 0;
-		_l += rl; _h += rh + ((_l < rl) ? 1 : 0);
-		return *this;
-	}
-
-	int_128 & operator+=(const int64_t & rhs)
-	{
-		const uint64_t rl = uint64_t(rhs); const int64_t rh = (rhs < 0) ? -1 : 0;
-		_l += rl; _h += rh + ((_l < rl) ? 1 : 0);
-		return *this;
-	}
-
-	int_128 & operator-=(const int64_t & rhs)
-	{
-		const uint64_t rl = uint64_t(rhs); const int64_t rh = (rhs < 0) ? -1 : 0;
-		_h -= rh + ((_l < rl) ? 1 : 0); _l -= rl;
-		return *this;
-	}
-
-	int_128 & operator>>=(const int & s)	// s != 0
-	{
-		_l = (_l >> s) | uint64_t(_h << (64 - s));
-		_h >>= s;
-		return *this;
-	}
-
-	int_128 operator+(const int_128 & rhs) const
-	{
-		const uint64_t l = _l + rhs._l;
-		return int_128(l, _h + rhs._h + ((l < _l) ? 1 : 0));
-	}
-
-	int_128 operator*(const uint32_t & rhs) const
-	{
-		return int_128(_l * rhs, _h * int64_t(rhs) + int64_t(mul_hi(_l, rhs)));
-	}
-
-	int_128 operator*(const uint64_t & rhs) const
-	{
-		return int_128(_l * rhs, _h * int64_t(rhs) + int64_t(mul_hi(_l, rhs)));
-	}
-};
+static int_128 int128_mul_u64i64(const uint_64 x, const int_64 y)
+{
+	int_128 r;
+	r.s0 = x * (uint_64)(y);
+	r.s1 = (int_64)(mul_hi(x, (uint_64)(y)) - ((y < 0) ? x : 0));
+	return r;
+}
 
 // The prime finite field Z/PZ
-template<uint32_t _P, uint32_t _PRIM_ROOT>
+template<uint_32 _P, uint_32 _PRIM_ROOT>
 class ZPT
 {
 private:
-	uint32_t _n;
+	uint_32 _n;
 
 private:
 	// p * q = 1 (mod 2^32) (Newton's method)
-	static constexpr uint32_t _invert(const uint32_t p)
+	static constexpr uint_32 _invert(const uint_32 p)
 	{
-		uint32_t q = 1, prev = 0;
+		uint_32 q = 1, prev = 0;
 		while (q != prev) { prev = q; q *= 2 - p * q; }
 		return q;
 	}
 
-	static const uint32_t _Q = _invert(_P);
+	static const uint_32 _Q = _invert(_P);
 
-	static uint32_t _add(const uint32_t a, const uint32_t b) { return a + b - ((a >= _P - b) ? _P : 0); }
-	static uint32_t _sub(const uint32_t a, const uint32_t b) { return a - b + ((a < b) ? _P : 0); }
+	static uint_32 _add(const uint_32 lhs, const uint_32 rhs) { return lhs + rhs - ((lhs >= _P - rhs) ? _P : 0); }
+	static uint_32 _sub(const uint_32 lhs, const uint_32 rhs) { return lhs - rhs + ((lhs < rhs) ? _P : 0); }
 
-	// Montgomery multiplication: 2 mul + 2 mul_hi
-	static uint32_t _mul(const uint32_t a, const uint32_t b)
+	// Montgomery multiplication by a constant: 1 mul + 2 mul_hi
+	static uint_32 _mul_const(const uint_32 lhs, const uint_32 rhs, const uint_32 rhs_Q)
 	{
-		const uint64_t t = a * uint64_t(b);
-		const uint32_t lo = uint32_t(t), hi = uint32_t(t >> 32);
-		const uint32_t mp = uint32_t(((lo * _Q) * uint64_t(_P)) >> 32);
-		return _sub(hi, mp);
+		const uint_32 mp = mul_hi(lhs * rhs_Q, _P);
+		return _sub(mul_hi(lhs, rhs), mp);
 	}
 
-	// 2^32 mod p = Montgomery form of 1
-	static const uint32_t _one = uint32_t((uint64_t(1) << 32) % _P);
-	// (2^32)^2 mod p
-	static const uint32_t _rsq = uint32_t((uint64_t(_one) * _one) % _P);
+	// Montgomery multiplication: 2 mul + 2 mul_hi
+	static uint_32 _mul(const uint_32 lhs, const uint_32 rhs) { return _mul_const(lhs, rhs,  rhs * _Q); }
 
-	ZPT pow(const uint64_t e) const
+	// 2^32 mod p = Montgomery form of 1
+	static const uint_32 _one = (uint_32)(((uint_64)(1) << 32) % _P);
+	// (2^32)^2 mod p
+	static const uint_32 _rsq = (uint_32)((_one * (uint_64)(_one)) % _P);
+
+	ZPT pow(const uint_32 e) const
 	{
 		if (e == 0) return one();
 		ZPT r = one(), y = *this;
-		for (uint64_t i = e; i > 1; i /= 2)
+		for (uint_32 i = e; i > 1; i /= 2)
 		{
 			if (i % 2 != 0) r *= y;
 			y *= y;
@@ -137,17 +132,17 @@ private:
 
 public:
 	ZPT() {}
-	explicit ZPT(const uint32_t n) : _n(n) {}
+	explicit ZPT(const uint_32 n) : _n(n) {}
 
-	static uint32_t P() { return _P; }
-	static uint32_t Q() { return _Q; }
+	static uint_32 P() { return _P; }
+	static uint_32 Q() { return _Q; }
 
 	static ZPT one() { return ZPT(_one); }
 	static ZPT rsq() { return ZPT(_rsq); }
 
-	uint32_t get() const { return _n; }
+	uint_32 get() const { return _n; }
 
-	ZPT & set_i(const int32_t i) { _n = (uint32_t)(i) + ((i < 0) ? _P : 0); return *this; }
+	ZPT & set_i(const int_32 i) { _n = (uint_32)(i) + ((i < 0) ? _P : 0); return *this; }
 
 	// Conversion into / out of Montgomery form
 	ZPT toMonty() const { return ZPT(_mul(_n, _rsq)); }
@@ -162,6 +157,9 @@ public:
 	ZPT operator+(const ZPT & rhs) const { return ZPT(_add(_n, rhs._n)); }
 	ZPT operator-(const ZPT & rhs) const { return ZPT(_sub(_n, rhs._n)); }
 	ZPT operator*(const ZPT & rhs) const { return ZPT(_mul(_n, rhs._n)); }
+
+	ZPT mul_Q() const { return ZPT(_n * _Q); }
+	ZPT mul_const(const ZPT & rhs, const ZPT & rhs_Q) const { return ZPT(_mul_const(_n, rhs._n, rhs_Q._n)); }
 
 	ZPT invert() const { return pow(_P - 2); }
 	static ZPT primroot_n(const int ln) { return ZPT(_PRIM_ROOT).toMonty().pow((_P - 1) >> ln); }
@@ -187,59 +185,59 @@ private:
 
 	// Chinese remainder theorem
 
-	int64_t garner2() const
+	static int_64 garner2(const ZP1 & r1, const ZP2 & r2)
 	{
-		static const uint32_t P1 = ZP1::P(), P2 = ZP2::P();
-		static const ZP1 invP2_P1 = ZP1(P2).toMonty().invert();	// P2 < P1
+		static const uint_32 P1 = ZP1::P(), P2 = ZP2::P();
+		static const ZP1 INVP2_P1 = ZP1(P2).toMonty().invert();	// P2 < P1
 
 		// convert to mixed-radix representation
-		const uint32_t r2 = _r2.get();
-		const uint32_t r1 = ((_r1 - ZP1(r2)) * invP2_P1).get();
-		const int32_t r1s = (r1 > P1 / 2) ? int32_t(r1 - P1) : int32_t(r1);
+		const uint_32 u2 = r2.get();
+		const uint_32 u1 = ((r1 - ZP1(u2)) * INVP2_P1).get();
+		const int_32 i1 = (u1 > P1 / 2) ? (int_32)(u1 - P1) : (int_32)(u1);
 
-		return int64_t(r2) + int64_t(P2) * r1s;
+		return (int_64)(u2) + (int_64)(P2) * i1;
 	}
 
-	int_128 garner4() const
+	static int_128 garner4(const ZP1 & r1, const ZP2 & r2, const ZP3 & r3, const ZP4 & r4)
 	{
-		static const uint32_t P1 = ZP1::P(), P2 = ZP2::P(), P3 = ZP3::P(), P4 = ZP4::P();
+		static const uint_32 P1 = ZP1::P(), P2 = ZP2::P(), P3 = ZP3::P(), P4 = ZP4::P();
 		// we must have P4 < P3 < P2 < P1
-		static const ZP3 invP4_P3 = ZP3(P4).toMonty().invert();
-		static const ZP2 invP4_P2 = ZP2(P4).toMonty().invert();
-		static const ZP2 invP3_P2 = ZP2(P3).toMonty().invert();
-		static const ZP1 invP4_P1 = ZP1(P4).toMonty().invert();
-		static const ZP1 invP3_P1 = ZP1(P3).toMonty().invert();
-		static const ZP1 invP2_P1 = ZP1(P2).toMonty().invert();
-		static const uint64_t P34 = P3 * uint64_t(P4);
+		static const ZP3 INVP4_P3 = ZP3(P4).toMonty().invert();
+		static const ZP2 INVP4_P2 = ZP2(P4).toMonty().invert();
+		static const ZP2 INVP3_P2 = ZP2(P3).toMonty().invert();
+		static const ZP1 INVP4_P1 = ZP1(P4).toMonty().invert();
+		static const ZP1 INVP3_P1 = ZP1(P3).toMonty().invert();
+		static const ZP1 INVP2_P1 = ZP1(P2).toMonty().invert();
+		static const uint_64 P34 = P3 * (uint_64)(P4);
 
 		// convert to mixed-radix representation
-		const uint32_t r4 = _r4.get();
-		const uint32_t r3 = ((_r3 - ZP3(r4)) * invP4_P3).get();
-		const uint32_t r2 = (((_r2 - ZP2(r4)) * invP4_P2 - ZP2(r3)) * invP3_P2).get();
-		const uint32_t r1 = ((((_r1 - ZP1(r4)) * invP4_P1 - ZP1(r3)) * invP3_P1 - ZP1(r2)) * invP2_P1).get();
-		const int32_t r1s = (r1 > P1 / 2) ? int32_t(r1 - P1) : int32_t(r1);
+		const uint_32 u4 = r4.get();
+		const uint_32 u3 = ((r3 - ZP3(u4)) * INVP4_P3).get();
+		const uint_32 u2 = (((r2 - ZP2(u4)) * INVP4_P2 - ZP2(u3)) * INVP3_P2).get();
+		const uint_32 u1 = ((((r1 - ZP1(u4)) * INVP4_P1 - ZP1(u3)) * INVP3_P1 - ZP1(u2)) * INVP2_P1).get();
+		const int_32 i1 = (u1 > P1 / 2) ? (int_32)(u1 - P1) : (int_32)(u1);
 
-		const uint64_t r34 = r4 + uint64_t(P4) * r3;
-		const int64_t r12s = int64_t(r2) + int64_t(P2) * r1s;
-		return int_128(r34) + int_128(r12s) * P34;
+		const uint_64 u34 = u4 + (uint_64)(P4) * u3;
+		const int_64 i12 = (int_64)(u2) + (int_64)(P2) * i1;
+		return int128_add_u64(int128_mul_u64i64(P34, i12), u34);
 	}
 
 public:
 	RNS() {}
-	explicit RNS(const uint32_t n) : _r1(n), _r2(n), _r3(n), _r4(n) {}
-	explicit RNS(const uint32_t n1, const uint32_t n2, const uint32_t n3, const uint32_t n4) : _r1(n1), _r2(n2), _r3(n3), _r4(n4) {}
+	explicit RNS(const uint_32 n) : _r1(n), _r2(n), _r3(n), _r4(n) {}
+	explicit RNS(const uint_32 n1, const uint_32 n2, const uint_32 n3, const uint_32 n4) : _r1(n1), _r2(n2), _r3(n3), _r4(n4) {}
 
 	static RNS one() { return RNS(ZP1::one(), ZP2::one(), ZP3::one(), ZP4::one()); }
 
-	uint32_t get_r1() const { return _r1.get(); }
-	uint32_t get_r2() const { return _r2.get(); }
-	uint32_t get_r3() const { return _r3.get(); }
-	uint32_t get_r4() const { return _r4.get(); }
+	uint_32 get_r1() const { return _r1.get(); }
+	uint_32 get_r2() const { return _r2.get(); }
+	uint_32 get_r3() const { return _r3.get(); }
+	uint_32 get_r4() const { return _r4.get(); }
 
-	int64_t get_i64() const { return garner2(); }
-	int_128 get_i128() const { return garner4(); }
+	int_64 get_i64() const { return garner2(_r1, _r2); }
+	int_128 get_i128() const { return garner4(_r1, _r2, _r3, _r4); }
 
-	RNS & set_i(const int32_t i) { _r1.set_i(i); _r2.set_i(i); _r3.set_i(i); _r4.set_i(i); return *this; }
+	RNS & set_i(const int_32 i) { _r1.set_i(i); _r2.set_i(i); _r3.set_i(i); _r4.set_i(i); return *this; }
 
 	// Conversion into / out of Montgomery form
 	RNS toMonty() const { return RNS(_r1.toMonty(), _r2.toMonty(), _r3.toMonty(), _r4.toMonty()); }
@@ -254,6 +252,13 @@ public:
 	RNS operator+(const RNS & rhs) const { RNS r = *this; r += rhs; return r; }
 	RNS operator-(const RNS & rhs) const { RNS r = *this; r -= rhs; return r; }
 	RNS operator*(const RNS & rhs) const { RNS r = *this; r *= rhs; return r; }
+
+	RNS mul_Q() const { return RNS(_r1.mul_Q(), _r2.mul_Q(), _r3.mul_Q(), _r4.mul_Q()); }
+	RNS mul_const(const RNS & rhs, const RNS & rhs_Q) const
+	{
+		return RNS(_r1.mul_const(rhs._r1, rhs_Q._r1), _r2.mul_const(rhs._r2, rhs_Q._r2),
+		           _r3.mul_const(rhs._r3, rhs_Q._r3), _r4.mul_const(rhs._r4, rhs_Q._r4));
+	}
 
 	RNS invert() const { return RNS(_r1.invert(), _r2.invert(), _r3.invert(), _r4.invert()); }
 	static RNS primroot_n(const int ln) { return RNS(ZP1::primroot_n(ln), ZP2::primroot_n(ln), ZP3::primroot_n(ln), ZP4::primroot_n(ln)); }
@@ -285,24 +290,53 @@ private:
 	static void FWD2(RNS & x0, RNS & x1, const RNS & w) { const RNS t = x1 * w; x1 = x0 - t; x0 = x0 + t; }
 	static void BCK2(RNS & x0, RNS & x1, const RNS & w_i) { const RNS t = x0 - x1; x0 = x0 + x1; x1 = t * w_i; }
 
-	static void SQR2(RNS & x0, RNS & x1, const RNS & w) { const RNS t = x1 * x1 * w; x1 = (x0 + x0) * x1; x0 = x0 * x0 + t; }
-	static void SQR2N(RNS & x0, RNS & x1, const RNS & w) { const RNS t = x1 * x1 * w; x1 = (x0 + x0) * x1; x0 = x0 * x0 - t; }
+	static void FWD2_const(RNS & x0, RNS & x1, const RNS & w, const RNS w_Q)
+	{
+		const RNS t = x1.mul_const(w, w_Q); x1 = x0 - t; x0 = x0 + t;
+	}
+	static void BCK2_const(RNS & x0, RNS & x1, const RNS & w_i, const RNS & w_i_Q)
+	{
+		const RNS t = x0 - x1; x0 = x0 + x1; x1 = t.mul_const(w_i, w_i_Q);
+	}
 
-	static void MUL2(RNS & x0, RNS & x1, const RNS & xp0, const RNS & xp1, const RNS & w) { const RNS t = (x1 * xp1) * w; x1 = x0 * xp1 + xp0 * x1; x0 = x0 * xp0 + t; }
-	static void MUL2N(RNS & x0, RNS & x1, const RNS & xp0, const RNS & xp1, const RNS & w) { const RNS t = (x1 * xp1) * w; x1 = x0 * xp1 + xp0 * x1; x0 = x0 * xp0 - t; }
+	static void SQR2(RNS & x0, RNS & x1, const RNS & w, const RNS w_Q)
+	{
+		const RNS t = (x1 * x1).mul_const(w, w_Q); x1 = (x0 + x0) * x1; x0 = x0 * x0 + t;
+	}
+	static void SQR2N(RNS & x0, RNS & x1, const RNS & w, const RNS w_Q)
+	{
+		const RNS t = (x1 * x1).mul_const(w, w_Q); x1 = (x0 + x0) * x1; x0 = x0 * x0 - t;
+	}
+
+	static void MUL2(RNS & x0, RNS & x1, const RNS & xp0, const RNS & xp1, const RNS & w, const RNS w_Q)
+	{
+		const RNS t = (x1 * xp1).mul_const(w, w_Q); x1 = x0 * xp1 + xp0 * x1; x0 = x0 * xp0 + t;
+	}
+	static void MUL2N(RNS & x0, RNS & x1, const RNS & xp0, const RNS & xp1, const RNS & w, const RNS w_Q)
+	{
+		const RNS t = (x1 * xp1).mul_const(w, w_Q); x1 = x0 * xp1 + xp0 * x1; x0 = x0 * xp0 - t;
+	}
 
 	static void _forward8(RNS x[8], const RNS & w1, const RNS w2[2], const RNS w4[4])
 	{
-		FWD2(x[0], x[4], w1); FWD2(x[1], x[5], w1); FWD2(x[2], x[6], w1); FWD2(x[3], x[7], w1);
-		FWD2(x[0], x[2], w2[0]); FWD2(x[1], x[3], w2[0]); FWD2(x[4], x[6], w2[1]); FWD2(x[5], x[7], w2[1]);
+		const RNS w1_Q = w1.mul_Q();
+		FWD2_const(x[0], x[4], w1, w1_Q); FWD2_const(x[1], x[5], w1, w1_Q); FWD2_const(x[2], x[6], w1, w1_Q); FWD2_const(x[3], x[7], w1, w1_Q);
+		const RNS w20_Q = w2[0].mul_Q();
+		FWD2_const(x[0], x[2], w2[0], w20_Q); FWD2_const(x[1], x[3], w2[0], w20_Q);
+		const RNS w21_Q = w2[1].mul_Q();
+		FWD2_const(x[4], x[6], w2[1], w21_Q); FWD2_const(x[5], x[7], w2[1], w21_Q);
 		FWD2(x[0], x[1], w4[0]); FWD2(x[2], x[3], w4[1]); FWD2(x[4], x[5], w4[2]); FWD2(x[6], x[7], w4[3]);
 	}
 
 	static void _backward8(RNS x[8], const RNS w1_i, const RNS w2_i[2], const RNS w4_i[4])
 	{
 		BCK2(x[0], x[1], w4_i[0]); BCK2(x[2], x[3], w4_i[1]); BCK2(x[4], x[5], w4_i[2]); BCK2(x[6], x[7], w4_i[3]);
-		BCK2(x[0], x[2], w2_i[0]); BCK2(x[1], x[3], w2_i[0]); BCK2(x[4], x[6], w2_i[1]); BCK2(x[5], x[7], w2_i[1]);
-		BCK2(x[0], x[4], w1_i); BCK2(x[1], x[5], w1_i); BCK2(x[2], x[6], w1_i); BCK2(x[3], x[7], w1_i);
+		const RNS w20_i_Q = w2_i[0].mul_Q();
+		BCK2_const(x[0], x[2], w2_i[0], w20_i_Q); BCK2_const(x[1], x[3], w2_i[0], w20_i_Q);
+		const RNS w21_i_Q = w2_i[1].mul_Q();
+		BCK2_const(x[4], x[6], w2_i[1], w21_i_Q); BCK2_const(x[5], x[7], w2_i[1], w21_i_Q);
+		const RNS w1_i_Q = w1_i.mul_Q();
+		BCK2_const(x[0], x[4], w1_i, w1_i_Q); BCK2_const(x[1], x[5], w1_i, w1_i_Q); BCK2_const(x[2], x[6], w1_i, w1_i_Q); BCK2_const(x[3], x[7], w1_i, w1_i_Q);
 	}
 
 	static void _forward8_0(RNS x[8], const RNS & w1, const RNS w2[2], const RNS w4[4])
@@ -311,52 +345,69 @@ private:
 		_forward8(x, w1, w2, w4);
 	}
 
-	static void _square2x4(RNS x[8], const RNS w2[2])
+	static void _square2x4(RNS x[8], const RNS w2[2], const RNS w2_Q[2])
 	{
-		SQR2(x[0], x[1], w2[0]); SQR2N(x[2], x[3], w2[0]); SQR2(x[4], x[5], w2[1]); SQR2N(x[6], x[7], w2[1]);
+		SQR2(x[0], x[1], w2[0], w2_Q[0]); SQR2N(x[2], x[3], w2[0], w2_Q[0]);
+		SQR2(x[4], x[5], w2[1], w2_Q[1]); SQR2N(x[6], x[7], w2[1], w2_Q[1]);
 	}
 
 	static void _square4x2(RNS x[8], const RNS w2[2], const RNS w2_i[2])
 	{
-		FWD2(x[0], x[2], w2[0]); FWD2(x[1], x[3], w2[0]); FWD2(x[4], x[6], w2[1]); FWD2(x[5], x[7], w2[1]);
-		_square2x4(x, w2);
-		BCK2(x[0], x[2], w2_i[0]); BCK2(x[1], x[3], w2_i[0]); BCK2(x[4], x[6], w2_i[1]); BCK2(x[5], x[7], w2_i[1]);
+		RNS w2_Q[2]; w2_Q[0] = w2[0].mul_Q(); w2_Q[1] = w2[1].mul_Q();
+		FWD2_const(x[0], x[2], w2[0], w2_Q[0]); FWD2_const(x[1], x[3], w2[0], w2_Q[0]);
+		FWD2_const(x[4], x[6], w2[1], w2_Q[1]); FWD2_const(x[5], x[7], w2[1], w2_Q[1]);
+		_square2x4(x, w2, w2_Q);
+		RNS w2_i_Q[2]; w2_i_Q[0] = w2_i[0].mul_Q(); w2_i_Q[1] = w2_i[1].mul_Q();
+		BCK2_const(x[0], x[2], w2_i[0], w2_i_Q[0]); BCK2_const(x[1], x[3], w2_i[0], w2_i_Q[0]);
+		BCK2_const(x[4], x[6], w2_i[1], w2_i_Q[1]); BCK2_const(x[5], x[7], w2_i[1], w2_i_Q[1]);
 	}
 
 	static void _square8(RNS x[8], const RNS & w1, const RNS & w1_i, const RNS w2[2], const RNS w2_i[2])
 	{
-		FWD2(x[0], x[4], w1); FWD2(x[1], x[5], w1); FWD2(x[2], x[6], w1); FWD2(x[3], x[7], w1);
+		const RNS w1_Q = w1.mul_Q();
+		FWD2_const(x[0], x[4], w1, w1_Q); FWD2_const(x[1], x[5], w1, w1_Q); FWD2_const(x[2], x[6], w1, w1_Q); FWD2_const(x[3], x[7], w1, w1_Q);
 		_square4x2(x, w2, w2_i);
-		BCK2(x[0], x[4], w1_i); BCK2(x[1], x[5], w1_i); BCK2(x[2], x[6], w1_i); BCK2(x[3], x[7], w1_i);
+		const RNS w1_i_Q = w1_i.mul_Q();
+		BCK2_const(x[0], x[4], w1_i, w1_i_Q); BCK2_const(x[1], x[5], w1_i, w1_i_Q); BCK2_const(x[2], x[6], w1_i, w1_i_Q); BCK2_const(x[3], x[7], w1_i, w1_i_Q);
 	}
 
-	static void _mul2x4(RNS x[8], const RNS xp[8], const RNS w2[2])
+	static void _mul2x4(RNS x[8], const RNS xp[8], const RNS w2[2], const RNS w2_Q[2])
 	{
-		MUL2(x[0], x[1], xp[0], xp[1], w2[0]); MUL2N(x[2], x[3], xp[2], xp[3], w2[0]); MUL2(x[4], x[5], xp[4], xp[5], w2[1]); MUL2N(x[6], x[7], xp[6], xp[7], w2[1]);
+		MUL2(x[0], x[1], xp[0], xp[1], w2[0], w2_Q[0]); MUL2N(x[2], x[3], xp[2], xp[3], w2[0], w2_Q[0]);
+		MUL2(x[4], x[5], xp[4], xp[5], w2[1], w2_Q[1]); MUL2N(x[6], x[7], xp[6], xp[7], w2[1], w2_Q[1]);
 	}
 
 	static void _mul4x2(RNS x[8], const RNS xp[8], const RNS w2[2], const RNS w2_i[2])
 	{
-		FWD2(x[0], x[2], w2[0]); FWD2(x[1], x[3], w2[0]); FWD2(x[4], x[6], w2[1]); FWD2(x[5], x[7], w2[1]);
-		_mul2x4(x, xp, w2);
-		BCK2(x[0], x[2], w2_i[0]); BCK2(x[1], x[3], w2_i[0]); BCK2(x[4], x[6], w2_i[1]); BCK2(x[5], x[7], w2_i[1]);
+		RNS w2_Q[2]; w2_Q[0] = w2[0].mul_Q(); w2_Q[1] = w2[1].mul_Q();
+		FWD2_const(x[0], x[2], w2[0], w2_Q[0]); FWD2_const(x[1], x[3], w2[0], w2_Q[0]);
+		FWD2_const(x[4], x[6], w2[1], w2_Q[1]); FWD2_const(x[5], x[7], w2[1], w2_Q[1]);
+		_mul2x4(x, xp, w2, w2_Q);
+		RNS w2_i_Q[2]; w2_i_Q[0] = w2_i[0].mul_Q(); w2_i_Q[1] = w2_i[1].mul_Q();
+		BCK2_const(x[0], x[2], w2_i[0], w2_i_Q[0]); BCK2_const(x[1], x[3], w2_i[0], w2_i_Q[0]);
+		BCK2_const(x[4], x[6], w2_i[1], w2_i_Q[1]); BCK2_const(x[5], x[7], w2_i[1], w2_i_Q[1]);
 	}
 
 	static void _mul8(RNS x[8], const RNS xp[8], const RNS & w1, const RNS & w1_i, const RNS w2[2], const RNS w2_i[2])
 	{
-		FWD2(x[0], x[4], w1); FWD2(x[1], x[5], w1); FWD2(x[2], x[6], w1); FWD2(x[3], x[7], w1);
+		const RNS w1_Q = w1.mul_Q();
+		FWD2_const(x[0], x[4], w1, w1_Q); FWD2_const(x[1], x[5], w1, w1_Q); FWD2_const(x[2], x[6], w1, w1_Q); FWD2_const(x[3], x[7], w1, w1_Q);
 		_mul4x2(x, xp, w2, w2_i);
-		BCK2(x[0], x[4], w1_i); BCK2(x[1], x[5], w1_i); BCK2(x[2], x[6], w1_i); BCK2(x[3], x[7], w1_i);
+		const RNS w1_i_Q = w1_i.mul_Q();
+		BCK2_const(x[0], x[4], w1_i, w1_i_Q); BCK2_const(x[1], x[5], w1_i, w1_i_Q); BCK2_const(x[2], x[6], w1_i, w1_i_Q); BCK2_const(x[3], x[7], w1_i, w1_i_Q);
 	}
 
 	static void _fwd4x2(RNS x[8], const RNS w2[2])
 	{
-		FWD2(x[0], x[2], w2[0]); FWD2(x[1], x[3], w2[0]); FWD2(x[4], x[6], w2[1]); FWD2(x[5], x[7], w2[1]);
+		RNS w2_Q[2]; w2_Q[0] = w2[0].mul_Q(); w2_Q[1] = w2[1].mul_Q();
+		FWD2_const(x[0], x[2], w2[0], w2_Q[0]); FWD2_const(x[1], x[3], w2[0], w2_Q[0]);
+		FWD2_const(x[4], x[6], w2[1], w2_Q[1]); FWD2_const(x[5], x[7], w2[1], w2_Q[1]);
 	}
 
 	static void _fwd8(RNS x[8], const RNS & w1, const RNS w2[2])
 	{
-		FWD2(x[0], x[4], w1); FWD2(x[2], x[6], w1); FWD2(x[1], x[5], w1); FWD2(x[3], x[7], w1);
+		const RNS w1_Q = w1.mul_Q();
+		FWD2_const(x[0], x[4], w1, w1_Q); FWD2_const(x[1], x[5], w1, w1_Q); FWD2_const(x[2], x[6], w1, w1_Q); FWD2_const(x[3], x[7], w1, w1_Q);
 		_fwd4x2(x, w2);
 	}
 
@@ -418,9 +469,10 @@ private:
 		for (size_t j = 0; j < n_8; ++j)
 		{
 			RNS w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
+			RNS w2_Q[2]; w2_Q[0] = w2[0].mul_Q(); w2_Q[1] = w2[1].mul_Q();
 
 			RNS xl[8]; _load(8, xl, &x[8 * j], 1);
-			_square2x4(xl, w2);
+			_square2x4(xl, w2, w2_Q);
 			_store(8, &x[8 * j], 1, xl);
 		}
 	}
@@ -458,10 +510,11 @@ private:
 		for (size_t j = 0; j < n_8; ++j)
 		{
 			RNS w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
+			RNS w2_Q[2]; w2_Q[0] = w2[0].mul_Q(); w2_Q[1] = w2[1].mul_Q();
 
 			RNS zl[8]; _load(8, zl, &x[8 * j], 1);
 			RNS zpl[8]; _load(8, zpl, &xp[8 * j], 1);
-			_mul2x4(zl, zpl, w2);
+			_mul2x4(zl, zpl, w2, w2_Q);
 			_store(8, &x[8 * j], 1, zl);
 		}
 	}
@@ -588,17 +641,17 @@ private:
 		return (i < x_size) ? x_ptr[i] : 0;
 	}
 
-	static constexpr uint32_t read_word(const mp_limb_t * const x_ptr, const size_t x_size, const size_t bit_index)
+	static constexpr uint_32 read_word(const mp_limb_t * const x_ptr, const size_t x_size, const size_t bit_index)
 	{
 		const size_t limb_index = bit_index / 64;
 		const int limb_shift = int(bit_index % 64);
 		const mp_limb_t rl = read_limb(x_ptr, x_size, limb_index), rh = read_limb(x_ptr, x_size, limb_index + 1);
 		mp_limb_t r = rl >> limb_shift;
 		if (limb_shift != 0) r |= rh << (64 - limb_shift);
-		return uint32_t(r);
+		return uint_32(r);
 	}
 
-	static constexpr void write_word(mp_limb_t * const x_ptr, const size_t bit_index, const uint32_t r)
+	static constexpr void write_word(mp_limb_t * const x_ptr, const size_t bit_index, const uint_32 r)
 	{
 		const size_t limb_index = bit_index / 64;
 		const int limb_shift = int(bit_index % 64);
@@ -610,7 +663,7 @@ private:
 	{
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
-		const uint32_t base = 1u << lbase;
+		const uint_32 base = 1u << lbase;
 		const RNS rbase = RNS(base).toMonty();
 
 		const size_t x_size = mpz_size(x);
@@ -619,9 +672,9 @@ private:
 		size_t bit_index = 0;
 		for (size_t i = 0; i < n; ++i)
 		{
-			const uint32_t r1 = read_word(x_ptr, x_size, bit_index) & (base - 1);
+			const uint_32 r1 = read_word(x_ptr, x_size, bit_index) & (base - 1);
 			bit_index += size_t(lbase);
-			const uint32_t r2 = read_word(x_ptr, x_size, bit_index) & (base - 1);
+			const uint_32 r2 = read_word(x_ptr, x_size, bit_index) & (base - 1);
 			bit_index += size_t(lbase);
 			y[i] = RNS(r1) + RNS(r2) * rbase;
 		}
@@ -631,25 +684,20 @@ private:
 	{
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase, lbase2 = 2 * lbase;
-		const uint32_t base = 1u << lbase;
+		const uint_32 base = 1u << lbase;
 
 		const size_t y_size = (size_t(lbase2) << _ln) / 64 + 2;
 		mp_limb_t * const y_ptr = mpz_limbs_write(y, mp_size_t(y_size));
 		for (size_t i = 0; i < y_size; ++i) y_ptr[i] = 0;
 
-		int64_t f = 0;
+		int_64 f = 0;
 		size_t bit_index = 0;
 		for (size_t i = 0; i < n; ++i)
 		{
-			const int64_t v = x[i].get_i64();
-			const uint32_t u1 = uint32_t(v) & (base - 1);
-			const int32_t i2 = int32_t(v >> lbase);
-
-			f += int64_t(u1);
-			const uint32_t r1 = uint32_t(f) & (base - 1);
+			f += x[i].get_i64();
+			const uint_32 r1 = (uint_32)(f) & (base - 1);
 			f >>= lbase;
-			f += i2;
-			const uint32_t r2 = uint32_t(f) & (base - 1);
+			const uint_32 r2 = (uint_32)(f) & (base - 1);
 			f >>= lbase;
 
 			write_word(y_ptr, bit_index, r1);
@@ -717,27 +765,27 @@ private:
 		else if (s0 == n / 2) mul2x4(y, x, w, n / 8);
 	}
 
-	void carry_mul_sub(RNS * const x, const RNS * const y, int_128 * const carry, const uint32_t a)
+	void carry_mul_sub(RNS * const x, const RNS * const y, int_128 * const carry, const uint_32 a)
 	{
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
 		const RNS & norm = _norm;
-		const uint32_t base = 1u << lbase;
+		const uint_32 base = 1u << lbase;
 		const RNS rbase = RNS(base).toMonty();
 	
 		for (size_t i = 0; i < n / CARRY_LENGTH; ++i)
 		{
-			int_128 f = int_128(0u);
+			int_128 f = int128_set(0u, 0);
 			for (size_t j = 0; j < CARRY_LENGTH; ++j)
 			{
 				const size_t k = i * CARRY_LENGTH + j;
 				// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF
-				f += (x[k] * norm).get_i128() * a;
-				if (y != nullptr) f -= y[k].get_i64();
-				const uint32_t r1 = f.get_u32() & (base - 1);
-				f >>= lbase;
-				const uint32_t r2 = f.get_u32() & (base - 1);
-				f >>= lbase;
+				f = int128_add(f, int128_mul_u32((x[k] * norm).get_i128(), a));
+				if (y != nullptr) f = int128_sub_i64(f, y[k].get_i64());
+				const uint_32 r1 = (uint_32)(f.s0) & (base - 1);
+				f = int128_rshift(f, lbase);
+				const uint_32 r2 = (uint_32)(f.s0) & (base - 1);
+				f = int128_rshift(f, lbase);
 				x[k] = RNS(r1) + RNS(r2) * rbase;
 			}
 			carry[i] = f;
@@ -748,33 +796,33 @@ private:
 	{
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
-		const uint32_t base = 1u << lbase;
+		const uint_32 base = 1u << lbase;
 		const RNS rbase = RNS(base).toMonty();
 
 		for (size_t i = 0; i < n / CARRY_LENGTH; ++i)
 		{
 			int_128 f = carry[((i == 0) ? (n / CARRY_LENGTH) : i) - 1];
-			if ((i == 0) && nega) f = -f;
+			if ((i == 0) && nega) f = int128_neg(f);
 
 			for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)
 			{
 				const size_t k = i * CARRY_LENGTH + j;
-				f += x[k].get_i64();
-				const uint32_t r1 = f.get_u32() & (base - 1);
-				f >>= lbase;
-				int32_t r2 = int32_t(f.get_u32() & (base - 1));
-				f >>= lbase;
+				f = int128_add_u64(f, (uint_64)(x[k].get_i64()));	// x[k] >= 0
+				const uint_32 r1 = (uint_32)(f.s0) & (base - 1);
+				f = int128_rshift(f, lbase);
+				int_32 r2 = (int_32)((uint_32)(f.s0) & (base - 1));
+				f = int128_rshift(f, lbase);
 #if defined(BALANCED)
-				if (r2 >= int32_t(base / 2)) { r2 -= int32_t(base); f += 1; }
+				if (r2 >= (int_32)(base / 2)) { r2 -= (int_32)(base); f = int128_add_u64(f, 1); }
 #endif
 				x[k] = RNS(r1) + RNS().set_i(r2) * rbase;
 			}
 			const size_t k = i * CARRY_LENGTH + CARRY_LENGTH - 1;
-			f += x[k].get_i64();
-			const uint32_t r1 = f.get_u32() & (base - 1);
-			f >>= lbase;
-			const int32_t r2 = f.get_i32();
-			x[k] = RNS(r1) + RNS().set_i(r2) * rbase;	// -1 <= x_k <= base
+			f = int128_add_u64(f, (uint_64)(x[k].get_i64()));	// x[k] >= 0
+			const uint_32 r1 = (uint_32)(f.s0) & (base - 1);
+			f = int128_rshift(f, lbase);
+			const int_32 r2 = (int_32)(f.s0);
+			x[k] = RNS(r1) + RNS().set_i(r2) * rbase;
 		}
 	}
 
@@ -783,8 +831,8 @@ private:
 	{
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
-		const uint32_t base = 1u << lbase;
-		const int64_t base2 = int64_t(1) << (2 * lbase);
+		const uint_32 base = 1u << lbase;
+		const int_64 base2 = int_64(1) << (2 * lbase);
 		const RNS rbase2 = RNS(base) * RNS(base).toMonty();
 		const RNS rbase2_m1 = rbase2 - RNS(1);
 
@@ -808,12 +856,12 @@ private:
 		}
 	}
 
-	void lower(RNS * const x, const int32_t l0)
+	void lower(RNS * const x, const int_32 l0)
 	{
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
-		const uint32_t base = 1u << lbase;
-		const int64_t base2 = int64_t(1) << (2 * lbase);
+		const uint_32 base = 1u << lbase;
+		const int_64 base2 = int_64(1) << (2 * lbase);
 		const RNS rbase2 = RNS(base) * RNS(base).toMonty();
 
 		if (x[n - 1].get_i64() >= base2)	// >= base^n
@@ -824,16 +872,16 @@ private:
 		}
 	}
 
-	void positive(RNS * const x, const int32_t l0)
+	void positive(RNS * const x, const int_32 l0)
 	{
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
-		const uint32_t base = 1u << lbase;
+		const uint_32 base = 1u << lbase;
 		const RNS rbase2 = RNS(base) * RNS(base).toMonty();
 
 		for (size_t i = 0; i < n; ++i)
 		{
-			const int64_t u = x[n - 1 - i].get_i64();
+			const int_64 u = x[n - 1 - i].get_i64();
 			if (u > 0) return;
 			if (u < 0)
 			{
@@ -862,7 +910,7 @@ private:
 		for (size_t i = 0; i < n; ++i)
 		{
 			const size_t j = n - 1 - i;
-			int64_t u = x[j].get_i64();
+			int_64 u = x[j].get_i64();
 			if (u != 0)
 			{
 #if !defined(BALANCED)
@@ -906,7 +954,7 @@ private:
 
 	// Modular arithmetic
 
-	void square_mul_mod_R(RNS * const y, const RNS * const x, const uint32_t a)
+	void square_mul_mod_R(RNS * const y, const RNS * const x, const uint_32 a)
 	{
 		set(y, x); const size_t s0 = NTT_forward8(y, _w_R);
 		square(y, _w_R, _wi_R, s0);
@@ -915,7 +963,7 @@ private:
 		carry_complete(y, _carry, false);
 	}
 
-	void square_mul_mod_Q(RNS * const y, const RNS * const x, const uint32_t a)
+	void square_mul_mod_Q(RNS * const y, const RNS * const x, const uint_32 a)
 	{
 		set(y, x); const size_t s0 = NTT_forward8(y, _w_Q);
 		square(y, _w_Q, _wi_Q, s0);
@@ -971,7 +1019,7 @@ private:
 		reduceMMGW(x);
 	}
 
-	void squareMMGW(RNS * const x, const uint32_t a)
+	void squareMMGW(RNS * const x, const uint_32 a)
 	{
 		square_mul_mod_Q(_t_Q, x, a);
 		square_mul_mod_R(x, x, a);
@@ -1003,7 +1051,7 @@ public:
 
 	void square_mul(const int32_t a) override
 	{
-		squareMMGW(_reg[Reg0], uint32_t(a));
+		squareMMGW(_reg[Reg0], uint_32(a));
 	}
 
 	void mul(const size_t dst, const size_t src) override
@@ -1020,10 +1068,10 @@ public:
 	{
 		const size_t n = size_t(1) << _ln;
 
-		uint32_t * const buf = new uint32_t[4 * n];
+		uint_32 * const buf = new uint_32[4 * n];
 		for (size_t i = 0; i < 2; ++i)
 		{
-			if (!cfile.read(reinterpret_cast<char *>(buf), 4 * n * sizeof(uint32_t))) { delete[] buf; return false; }
+			if (!cfile.read(reinterpret_cast<char *>(buf), 4 * n * sizeof(uint_32))) { delete[] buf; return false; }
 			RNS * const reg = _reg[i];
 			for (size_t k = 0; k < n; ++k) reg[k] = RNS(buf[k + 0 * n], buf[k + 1 * n], buf[k + 2 * n], buf[k + 3 * n]);
 		}
@@ -1036,7 +1084,7 @@ public:
 	{
 		const size_t n = size_t(1) << _ln;
 
-		uint32_t * const buf = new uint32_t[4 * n];
+		uint_32 * const buf = new uint_32[4 * n];
 		for (size_t i = 0; i < 2; ++i)
 		{
 			const RNS * const reg = _reg[i];
@@ -1046,7 +1094,7 @@ public:
 				buf[k + 0 * n] = r.get_r1(); buf[k + 1 * n] = r.get_r2();
 				buf[k + 2 * n] = r.get_r3(); buf[k + 3 * n] = r.get_r4();
 			}
-			if (!cfile.write(reinterpret_cast<const char *>(buf), 4 * n * sizeof(uint32_t))) break;
+			if (!cfile.write(reinterpret_cast<const char *>(buf), 4 * n * sizeof(uint_32))) break;
 		}
 		delete[] buf;
 	}

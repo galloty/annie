@@ -17,8 +17,14 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #include <gmp.h>
 
+// #define CPU_TRANSFORM	true
+
 #include "transformGMP.h"
+#if defined(CPU_TRANSFORM)
+#include "transformCPU.h"
+#else
 #include "transformGPU.h"
+#endif
 #include "file.h"
 #include "timer.h"
 
@@ -249,7 +255,12 @@ public:
 			print(ss.str());
 		}
 
-		transform * const p_transform = (nsize < GMP_THRESHOLD) ? dynamic_cast<transform *>(new transformGMP(n, a)) : create_transformGPU(n, a, device);	// new transformCPU(n, a);
+		transform * const p_transform = (nsize < GMP_THRESHOLD) ? dynamic_cast<transform *>(new transformGMP(n, a)) :
+#if defined(CPU_TRANSFORM)
+			new transformCPU(n, a);
+#else
+			create_transformGPU(n, a, device);
+#endif
 		if (p_transform->init_failed())
 		{
 			if (verbose)
@@ -428,7 +439,12 @@ public:
 		{
 			mpz_set_ui(n, 3); mpz_mul_2exp(n, n, e); mpz_add_ui(n, n, 1);
 
-			transform * const p_transform = create_transformGPU(n, 3, device);	// new transformCPU(n, 3);
+			transform * const p_transform =
+#if defined(CPU_TRANSFORM)
+				new transformCPU(n, 3);
+#else
+				create_transformGPU(n, 3, device);
+#endif
 
 			if (first)
 			{
