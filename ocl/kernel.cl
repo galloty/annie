@@ -20,7 +20,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define N_SZ			1024u
 #define LBASE			28
 #define PRM_COUNT		4
-#define RHO				2
+#define PCK_FACTOR		2
 #define P1				4194304001u
 #define Q1				100663297u
 #define RSQ1			232465106u
@@ -127,13 +127,8 @@ INLINE int_128 int128_add_i64(const int_128 x, const int_64 y)
 INLINE int_128 int128_sub_i64(const int_128 x, const int_64 y)
 {
 	int_128 r;
-// #if defined(PTX_ASM)	// TODO
-// 	asm volatile ("add.cc.u64 %0, %1, %2;" : "=r" (r.s0) : "r" (x.s0), "r" (y));
-// 	asm volatile ("addc.s64 %0, %1, 0;" : "=r" (r.s1) : "r" (x.s1));
-// #else
 	r.s0 = x.s0 - (uint_64)(y);
 	r.s1 = x.s1 - ((y < 0) ? -1 : 0) - ((x.s0 < (uint_64)(y)) ? 1 : 0);
-// #endif
 	return r;
 }
 
@@ -1259,50 +1254,130 @@ INLINE int_128 get_i128(const RNS4 r) { return garner4(r.r[0], r.r[1], r.r[2], r
 
 #endif
 
-#if (PRM_COUNT == 4)
+#if (PRM_COUNT == 2)
+
+typedef int_64		big_type;
+typedef uint_32		pck_type;	// pck_factor = 1
+
+INLINE pck_type extract_r(big_type * const f)
+{
+	const pck_type r = (uint_32)(*f) & (BASE - 1);
+	(*f) >>= LBASE;
+	return r;
+}
 
 INLINE void carry_mul_sub_1(const __global ZP * restrict const xi, __global const ZP * restrict const yi,
-	__global int_128 * restrict const carry, __local int_128 * const cl, uint2_32 r[CARRY_LENGTH], const sz_t id, const uint_32 a)
+	__global big_type * restrict const carry, __local big_type * const cl, pck_type r[CARRY_LENGTH], const sz_t id, const uint_32 a)
+{
+	// assert CARRY_LENGTH = 4
+	ZP4 x4[2]; for (sz_t l = 0; l < 2; ++l) x4[l] = load4g(xi, l * Z_OFFSET / 4);
+	RNS2 y[4]; for (sz_t l = 0; l < 2; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }
+
+	big_type f = 0;
+	for (sz_t j = 0; j < CARRY_LENGTH; ++j)
+	{
+		// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF
+		f += get_i64(mulmod2(y[j], NORM_2())) * a;
+		if (yi != NULL_PTR) f -= get_i32(yi[j], P1);
+		r[j] = extract_r(&f);
+	}
+
+	const sz_t lid = id % CARRY_WG_SZ;
+	cl[lid] = f;
+	if (lid == CARRY_WG_SZ - 1) carry[id / CARRY_WG_SZ] = f;
+}
+
+INLINE void carry_2(__global ZP * restrict const xi, const __local big_type * const cl, const pck_type r[CARRY_LENGTH], const sz_t lid)
+{
+	big_type f = (lid != 0) ? cl[lid - 1] : 0;
+	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)
+	{
+		f += r[j];
+		int_32 ri = (int_32)extract_r(&f);
+
+		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f += 1; }	// balanced
+
+		storeRNS2(&xi[j], set2_i32(ri));
+	}
+
+	f += r[CARRY_LENGTH - 1];
+	const int_32 r1 = (int_32)(f);
+
+	storeRNS2(&xi[CARRY_LENGTH - 1], set2_i32(r1));
+}
+
+INLINE void carry_3(__global ZP * restrict const xi, __global const big_type * restrict const carry, const int_32 is_nega, const sz_t id)
+{
+	// assert CARRY_LENGTH = 4
+	const ZP4 x4 = load4g(xi, 0 * Z_OFFSET / 4);
+	ZP y[4]; y[0] = x4.s0; y[1] = x4.s1; y[2] = x4.s2; y[3] = x4.s3;
+
+	big_type f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];
+	if ((id == 0) && (is_nega != 0)) f = -f;
+	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)
+	{
+		f += get_i32(y[j], P1);
+		int_32 ri = (int_32)extract_r(&f);
+
+		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f += 1; }	// balanced
+
+		storeRNS2(&xi[j], set2_i32(ri));
+	}
+
+	f += get_i32(y[CARRY_LENGTH - 1], P1);
+	const int_32 r1 = (int_32)(f);
+
+	storeRNS2(&xi[CARRY_LENGTH - 1], set2_i32(r1));
+}
+
+#elif (PRM_COUNT == 4)
+
+typedef int_128		big_type;
+typedef uint2_32	pck_type;	// pck_factor = 2
+
+INLINE pck_type extract_r(big_type * const f)
+{
+	pck_type r;
+	r.s0 = (uint_32)((*f).s0) & (BASE - 1);
+	(*f) = int128_rshift((*f), LBASE);
+	r.s1 = (uint_32)((*f).s0) & (BASE - 1);
+	(*f) = int128_rshift((*f), LBASE);
+	return r;
+}
+
+INLINE void carry_mul_sub_1(const __global ZP * restrict const xi, __global const ZP * restrict const yi,
+	__global big_type * restrict const carry, __local big_type * const cl, pck_type r[CARRY_LENGTH], const sz_t id, const uint_32 a)
 {
 	// assert CARRY_LENGTH = 4
 	ZP4 x4[4]; for (sz_t l = 0; l < 4; ++l) x4[l] = load4g(xi, l * Z_OFFSET / 4);
 	RNS4 y[4]; for (sz_t l = 0; l < 4; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }
 
-	int_128 f = int128_set(0u, 0);
+	big_type f = int128_set(0u, 0);
 	for (sz_t j = 0; j < CARRY_LENGTH; ++j)
 	{
 		// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF
 		f = int128_add(f, int128_mul_u32(get_i128(mulmod4(y[j], NORM_4())), a));
 		if (yi != NULL_PTR) { const RNS2 r2 = loadRNS2(&yi[j]); f = int128_sub_i64(f, get_i64(r2)); }
-
-		r[j].s0 = (uint_32)(f.s0) & (BASE - 1);
-		f = int128_rshift(f, LBASE);
-		r[j].s1 = (uint_32)(f.s0) & (BASE - 1);
-		f = int128_rshift(f, LBASE);
+		r[j] = extract_r(&f);
 	}
 
 	const sz_t lid = id % CARRY_WG_SZ;
 	cl[lid] = f;
-
 	if (lid == CARRY_WG_SZ - 1) carry[id / CARRY_WG_SZ] = f;
 }
 
-INLINE void carry_2(__global ZP * restrict const xi, const __local int_128 * const cl, const uint2_32 r[CARRY_LENGTH], const sz_t id)
+INLINE void carry_2(__global ZP * restrict const xi, const __local big_type * const cl, const pck_type r[CARRY_LENGTH], const sz_t lid)
 {
-	const sz_t lid = id % CARRY_WG_SZ;
-	int_128 f = (lid != 0) ? cl[lid - 1] : int128_set(0u, 0);
-
+	big_type f = (lid != 0) ? cl[lid - 1] : int128_set(0u, 0);
 	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)
 	{
 		f = int128_add_u64(f, r[j].s0 | ((uint_64)(r[j].s1) << LBASE));
-		const uint_32 r1 = (uint_32)(f.s0) & (BASE - 1);
-		f = int128_rshift(f, LBASE);
-		int_32 r2 = (int_32)((uint_32)(f.s0) & (BASE - 1));
-		f = int128_rshift(f, LBASE);
+		const pck_type re = extract_r(&f);
 
-		if (r2 >= (int_32)(BASE / 2)) { r2 -= (int_32)(BASE); f = int128_add_u64(f, 1); }	// balanced
+		int_32 ri = (int_32)(re.s1);
+		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f = int128_add_u64(f, 1); }	// balanced
 
-		const RNS4 u = addmod4(set4_u32(r1), mulmod4(set4_i32(r2), RBASE_4()));
+		const RNS4 u = addmod4(set4_u32(re.s0), mulmod4(set4_i32(ri), RBASE_4()));
 		storeRNS4(&xi[j], u);
 	}
 
@@ -1315,57 +1390,23 @@ INLINE void carry_2(__global ZP * restrict const xi, const __local int_128 * con
 	storeRNS4(&xi[CARRY_LENGTH - 1], u);
 }
 
-__kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))
-void carry_mul(__global ZP * restrict const reg, __global int_128 * restrict const carry, const uint_32 reg_x, const uint_32 a)
+INLINE void carry_3(__global ZP * restrict const xi, __global const big_type * restrict const carry, const int_32 is_nega, const sz_t id)
 {
-	const sz_t id = (sz_t)get_global_id(0);
-	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];
-	__local int_128 cl[CARRY_WG_SZ];
-	uint2_32 r[CARRY_LENGTH];
-
-	carry_mul_sub_1(xi, NULL_PTR, carry, cl, r, id, a);
-	barrier(CLK_LOCAL_MEM_FENCE);
-	carry_2(xi, cl, r, id);
-}
-
-__kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))
-void carry_sub(__global ZP * restrict const reg, __global int_128 * restrict const carry, const uint_32 reg_x, const uint_32 reg_y)
-{
-	const sz_t id = (sz_t)get_global_id(0);
-	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];
-	__global const ZP * restrict const yi = &reg[reg_y * N_SZ + CARRY_LENGTH * id];
-	__local int_128 cl[CARRY_WG_SZ];
-	uint2_32 r[CARRY_LENGTH];
-
-	carry_mul_sub_1(xi, yi, carry, cl, r, id, 1);
-	barrier(CLK_LOCAL_MEM_FENCE);
-	carry_2(xi, cl, r, id);
-}
-
-__kernel
-void carry_complete(__global ZP * restrict const reg, __global const int_128 * restrict const carry, const uint_32 reg_x, const int_32 is_nega)
-{
-	const sz_t id = (sz_t)get_global_id(0);
-	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * CARRY_WG_SZ * id];
-
-	int_128 f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];
-	if ((id == 0) && (is_nega != 0)) f = int128_neg(f);
-
 	// assert CARRY_LENGTH = 4
 	ZP4 x4[2]; for (sz_t l = 0; l < 2; ++l) x4[l] = load4g(xi, l * Z_OFFSET / 4);
 	RNS2 y[4]; for (sz_t l = 0; l < 2; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }
 
+	big_type f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];
+	if ((id == 0) && (is_nega != 0)) f = int128_neg(f);
 	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)
 	{
 		f = int128_add_i64(f, get_i64(y[j]));
-		const uint_32 r1 = (uint_32)(f.s0) & (BASE - 1);
-		f = int128_rshift(f, LBASE);
-		int_32 r2 = (int_32)((uint_32)(f.s0) & (BASE - 1));
-		f = int128_rshift(f, LBASE);
+		const pck_type re = extract_r(&f);
 
-		if (r2 >= (int_32)(BASE / 2)) { r2 -= (int_32)(BASE); f = int128_add_u64(f, 1); }	// balanced
+		int_32 ri = (int_32)(re.s1);
+		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f = int128_add_u64(f, 1); }	// balanced
 
-		const RNS4 u = addmod4(set4_u32(r1), mulmod4(set4_i32(r2), RBASE_4()));
+		const RNS4 u = addmod4(set4_u32(re.s0), mulmod4(set4_i32(ri), RBASE_4()));
 		storeRNS4(&xi[j], u);
 	}
 
@@ -1378,116 +1419,43 @@ void carry_complete(__global ZP * restrict const reg, __global const int_128 * r
 	storeRNS4(&xi[CARRY_LENGTH - 1], u);
 }
 
-#elif (PRM_COUNT == 2)
-
-INLINE void carry_mul_sub_1(const __global ZP * restrict const xi, __global const ZP * restrict const yi,
-	__global int_64 * restrict const carry, __local int_64 * const cl, uint_32 r[CARRY_LENGTH], const sz_t id, const uint_32 a)
-{
-	// assert CARRY_LENGTH = 4
-	ZP4 x4[2]; for (sz_t l = 0; l < 2; ++l) x4[l] = load4g(xi, l * Z_OFFSET / 4);
-	RNS2 y[4]; for (sz_t l = 0; l < 2; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }
-
-	int_64 f = 0;
-	for (sz_t j = 0; j < CARRY_LENGTH; ++j)
-	{
-		// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF
-		f += get_i64(mulmod2(y[j], NORM_2())) * a;
-		if (yi != NULL_PTR) f -= get_i32(yi[j], P1);
-
-		r[j] = (uint_32)(f) & (BASE - 1);
-		f >>= LBASE;
-	}
-
-	const sz_t lid = id % CARRY_WG_SZ;
-	cl[lid] = f;
-
-	if (lid == CARRY_WG_SZ - 1) carry[id / CARRY_WG_SZ] = f;
-}
-
-INLINE void carry_2(__global ZP * restrict const xi, const __local int_64 * const cl, const uint_32 r[CARRY_LENGTH], const sz_t id)
-{
-	const sz_t lid = id % CARRY_WG_SZ;
-	int_64 f = (lid != 0) ? cl[lid - 1] : 0;
-
-	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)
-	{
-		f += r[j];
-		int_32 r1 = (int_32)((uint_32)(f) & (BASE - 1));
-		f >>= LBASE;
-
-		if (r1 >= (int_32)(BASE / 2)) { r1 -= (int_32)(BASE); f += 1; }	// balanced
-
-		const RNS2 u = set2_i32(r1);
-		storeRNS2(&xi[j], u);
-	}
-
-	f += r[CARRY_LENGTH - 1];
-	const int_32 r1 = (int_32)(f);
-
-	const RNS2 u = set2_i32(r1);
-	storeRNS2(&xi[CARRY_LENGTH - 1], u);
-}
+#endif
 
 __kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))
-void carry_mul(__global ZP * restrict const reg, __global int_64 * restrict const carry, const uint_32 reg_x, const uint_32 a)
+void carry_mul(__global ZP * restrict const reg, __global big_type * restrict const carry, const uint_32 reg_x, const uint_32 a)
 {
 	const sz_t id = (sz_t)get_global_id(0);
 	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];
-	__local int_64 cl[CARRY_WG_SZ];
-	uint_32 r[CARRY_LENGTH];
+	__local big_type cl[CARRY_WG_SZ];
+	pck_type r[CARRY_LENGTH];
 
 	carry_mul_sub_1(xi, NULL_PTR, carry, cl, r, id, a);
 	barrier(CLK_LOCAL_MEM_FENCE);
-	carry_2(xi, cl, r, id);
+	carry_2(xi, cl, r, id % CARRY_WG_SZ);
 }
 
 __kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))
-void carry_sub(__global ZP * restrict const reg, __global int_64 * restrict const carry, const uint_32 reg_x, const uint_32 reg_y)
+void carry_sub(__global ZP * restrict const reg, __global big_type * restrict const carry, const uint_32 reg_x, const uint_32 reg_y)
 {
 	const sz_t id = (sz_t)get_global_id(0);
 	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];
 	__global const ZP * restrict const yi = &reg[reg_y * N_SZ + CARRY_LENGTH * id];
-	__local int_64 cl[CARRY_WG_SZ];
-	uint_32 r[CARRY_LENGTH];
+	__local big_type cl[CARRY_WG_SZ];
+	pck_type r[CARRY_LENGTH];
 
 	carry_mul_sub_1(xi, yi, carry, cl, r, id, 1);
 	barrier(CLK_LOCAL_MEM_FENCE);
-	carry_2(xi, cl, r, id);
+	carry_2(xi, cl, r, id % CARRY_WG_SZ);
 }
 
 __kernel
-void carry_complete(__global ZP * restrict const reg, __global const int_64 * restrict const carry, const uint_32 reg_x, const int_32 is_nega)
+void carry_complete(__global ZP * restrict const reg, __global const big_type * restrict const carry, const uint_32 reg_x, const int_32 is_nega)
 {
 	const sz_t id = (sz_t)get_global_id(0);
 	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * CARRY_WG_SZ * id];
 
-	int_64 f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];
-	if ((id == 0) && (is_nega != 0)) f = -f;
-
-	// assert CARRY_LENGTH = 4
-	const ZP4 x4 = load4g(xi, 0 * Z_OFFSET / 4);
-	ZP y[4]; y[0] = x4.s0; y[1] = x4.s1; y[2] = x4.s2; y[3] = x4.s3;
-
-	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)
-	{
-		f += get_i32(y[j], P1);
-		int_32 r1 = (int_32)((uint_32)(f) & (BASE - 1));
-		f >>= LBASE;
-
-		if (r1 >= (int_32)(BASE / 2)) { r1 -= (int_32)(BASE); f += 1; }	// balanced
-
-		const RNS2 u = set2_i32(r1);
-		storeRNS2(&xi[j], u);
-	}
-
-	f += get_i32(y[CARRY_LENGTH - 1], P1);
-	const int_32 r1 = (int_32)(f);
-
-	const RNS2 u = set2_i32(r1);
-	storeRNS2(&xi[CARRY_LENGTH - 1], u);
+	carry_3(xi, carry, is_nega, id);
 }
-
-#endif
 
 // --- strict modulo ---
 

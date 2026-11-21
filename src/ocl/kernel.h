@@ -32,7 +32,7 @@ static const char * const src_ocl_kernel = \
 "#define N_SZ			1024u\n" \
 "#define LBASE			28\n" \
 "#define PRM_COUNT		4\n" \
-"#define RHO				2\n" \
+"#define PCK_FACTOR		2\n" \
 "#define P1				4194304001u\n" \
 "#define Q1				100663297u\n" \
 "#define RSQ1			232465106u\n" \
@@ -139,13 +139,8 @@ static const char * const src_ocl_kernel = \
 "INLINE int_128 int128_sub_i64(const int_128 x, const int_64 y)\n" \
 "{\n" \
 "	int_128 r;\n" \
-"// #if defined(PTX_ASM)	// TODO\n" \
-"// 	asm volatile (\"add.cc.u64 %0, %1, %2;\" : \"=r\" (r.s0) : \"r\" (x.s0), \"r\" (y));\n" \
-"// 	asm volatile (\"addc.s64 %0, %1, 0;\" : \"=r\" (r.s1) : \"r\" (x.s1));\n" \
-"// #else\n" \
 "	r.s0 = x.s0 - (uint_64)(y);\n" \
 "	r.s1 = x.s1 - ((y < 0) ? -1 : 0) - ((x.s0 < (uint_64)(y)) ? 1 : 0);\n" \
-"// #endif\n" \
 "	return r;\n" \
 "}\n" \
 "\n" \
@@ -1271,50 +1266,130 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "#endif\n" \
 "\n" \
-"#if (PRM_COUNT == 4)\n" \
+"#if (PRM_COUNT == 2)\n" \
+"\n" \
+"typedef int_64		big_type;\n" \
+"typedef uint_32		pck_type;	// pck_factor = 1\n" \
+"\n" \
+"INLINE pck_type extract_r(big_type * const f)\n" \
+"{\n" \
+"	const pck_type r = (uint_32)(*f) & (BASE - 1);\n" \
+"	(*f) >>= LBASE;\n" \
+"	return r;\n" \
+"}\n" \
 "\n" \
 "INLINE void carry_mul_sub_1(const __global ZP * restrict const xi, __global const ZP * restrict const yi,\n" \
-"	__global int_128 * restrict const carry, __local int_128 * const cl, uint2_32 r[CARRY_LENGTH], const sz_t id, const uint_32 a)\n" \
+"	__global big_type * restrict const carry, __local big_type * const cl, pck_type r[CARRY_LENGTH], const sz_t id, const uint_32 a)\n" \
+"{\n" \
+"	// assert CARRY_LENGTH = 4\n" \
+"	ZP4 x4[2]; for (sz_t l = 0; l < 2; ++l) x4[l] = load4g(xi, l * Z_OFFSET / 4);\n" \
+"	RNS2 y[4]; for (sz_t l = 0; l < 2; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }\n" \
+"\n" \
+"	big_type f = 0;\n" \
+"	for (sz_t j = 0; j < CARRY_LENGTH; ++j)\n" \
+"	{\n" \
+"		// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF\n" \
+"		f += get_i64(mulmod2(y[j], NORM_2())) * a;\n" \
+"		if (yi != NULL_PTR) f -= get_i32(yi[j], P1);\n" \
+"		r[j] = extract_r(&f);\n" \
+"	}\n" \
+"\n" \
+"	const sz_t lid = id % CARRY_WG_SZ;\n" \
+"	cl[lid] = f;\n" \
+"	if (lid == CARRY_WG_SZ - 1) carry[id / CARRY_WG_SZ] = f;\n" \
+"}\n" \
+"\n" \
+"INLINE void carry_2(__global ZP * restrict const xi, const __local big_type * const cl, const pck_type r[CARRY_LENGTH], const sz_t lid)\n" \
+"{\n" \
+"	big_type f = (lid != 0) ? cl[lid - 1] : 0;\n" \
+"	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
+"	{\n" \
+"		f += r[j];\n" \
+"		int_32 ri = (int_32)extract_r(&f);\n" \
+"\n" \
+"		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f += 1; }	// balanced\n" \
+"\n" \
+"		storeRNS2(&xi[j], set2_i32(ri));\n" \
+"	}\n" \
+"\n" \
+"	f += r[CARRY_LENGTH - 1];\n" \
+"	const int_32 r1 = (int_32)(f);\n" \
+"\n" \
+"	storeRNS2(&xi[CARRY_LENGTH - 1], set2_i32(r1));\n" \
+"}\n" \
+"\n" \
+"INLINE void carry_3(__global ZP * restrict const xi, __global const big_type * restrict const carry, const int_32 is_nega, const sz_t id)\n" \
+"{\n" \
+"	// assert CARRY_LENGTH = 4\n" \
+"	const ZP4 x4 = load4g(xi, 0 * Z_OFFSET / 4);\n" \
+"	ZP y[4]; y[0] = x4.s0; y[1] = x4.s1; y[2] = x4.s2; y[3] = x4.s3;\n" \
+"\n" \
+"	big_type f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];\n" \
+"	if ((id == 0) && (is_nega != 0)) f = -f;\n" \
+"	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
+"	{\n" \
+"		f += get_i32(y[j], P1);\n" \
+"		int_32 ri = (int_32)extract_r(&f);\n" \
+"\n" \
+"		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f += 1; }	// balanced\n" \
+"\n" \
+"		storeRNS2(&xi[j], set2_i32(ri));\n" \
+"	}\n" \
+"\n" \
+"	f += get_i32(y[CARRY_LENGTH - 1], P1);\n" \
+"	const int_32 r1 = (int_32)(f);\n" \
+"\n" \
+"	storeRNS2(&xi[CARRY_LENGTH - 1], set2_i32(r1));\n" \
+"}\n" \
+"\n" \
+"#elif (PRM_COUNT == 4)\n" \
+"\n" \
+"typedef int_128		big_type;\n" \
+"typedef uint2_32	pck_type;	// pck_factor = 2\n" \
+"\n" \
+"INLINE pck_type extract_r(big_type * const f)\n" \
+"{\n" \
+"	pck_type r;\n" \
+"	r.s0 = (uint_32)((*f).s0) & (BASE - 1);\n" \
+"	(*f) = int128_rshift((*f), LBASE);\n" \
+"	r.s1 = (uint_32)((*f).s0) & (BASE - 1);\n" \
+"	(*f) = int128_rshift((*f), LBASE);\n" \
+"	return r;\n" \
+"}\n" \
+"\n" \
+"INLINE void carry_mul_sub_1(const __global ZP * restrict const xi, __global const ZP * restrict const yi,\n" \
+"	__global big_type * restrict const carry, __local big_type * const cl, pck_type r[CARRY_LENGTH], const sz_t id, const uint_32 a)\n" \
 "{\n" \
 "	// assert CARRY_LENGTH = 4\n" \
 "	ZP4 x4[4]; for (sz_t l = 0; l < 4; ++l) x4[l] = load4g(xi, l * Z_OFFSET / 4);\n" \
 "	RNS4 y[4]; for (sz_t l = 0; l < 4; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }\n" \
 "\n" \
-"	int_128 f = int128_set(0u, 0);\n" \
+"	big_type f = int128_set(0u, 0);\n" \
 "	for (sz_t j = 0; j < CARRY_LENGTH; ++j)\n" \
 "	{\n" \
 "		// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF\n" \
 "		f = int128_add(f, int128_mul_u32(get_i128(mulmod4(y[j], NORM_4())), a));\n" \
 "		if (yi != NULL_PTR) { const RNS2 r2 = loadRNS2(&yi[j]); f = int128_sub_i64(f, get_i64(r2)); }\n" \
-"\n" \
-"		r[j].s0 = (uint_32)(f.s0) & (BASE - 1);\n" \
-"		f = int128_rshift(f, LBASE);\n" \
-"		r[j].s1 = (uint_32)(f.s0) & (BASE - 1);\n" \
-"		f = int128_rshift(f, LBASE);\n" \
+"		r[j] = extract_r(&f);\n" \
 "	}\n" \
 "\n" \
 "	const sz_t lid = id % CARRY_WG_SZ;\n" \
 "	cl[lid] = f;\n" \
-"\n" \
 "	if (lid == CARRY_WG_SZ - 1) carry[id / CARRY_WG_SZ] = f;\n" \
 "}\n" \
 "\n" \
-"INLINE void carry_2(__global ZP * restrict const xi, const __local int_128 * const cl, const uint2_32 r[CARRY_LENGTH], const sz_t id)\n" \
+"INLINE void carry_2(__global ZP * restrict const xi, const __local big_type * const cl, const pck_type r[CARRY_LENGTH], const sz_t lid)\n" \
 "{\n" \
-"	const sz_t lid = id % CARRY_WG_SZ;\n" \
-"	int_128 f = (lid != 0) ? cl[lid - 1] : int128_set(0u, 0);\n" \
-"\n" \
+"	big_type f = (lid != 0) ? cl[lid - 1] : int128_set(0u, 0);\n" \
 "	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
 "	{\n" \
 "		f = int128_add_u64(f, r[j].s0 | ((uint_64)(r[j].s1) << LBASE));\n" \
-"		const uint_32 r1 = (uint_32)(f.s0) & (BASE - 1);\n" \
-"		f = int128_rshift(f, LBASE);\n" \
-"		int_32 r2 = (int_32)((uint_32)(f.s0) & (BASE - 1));\n" \
-"		f = int128_rshift(f, LBASE);\n" \
+"		const pck_type re = extract_r(&f);\n" \
 "\n" \
-"		if (r2 >= (int_32)(BASE / 2)) { r2 -= (int_32)(BASE); f = int128_add_u64(f, 1); }	// balanced\n" \
+"		int_32 ri = (int_32)(re.s1);\n" \
+"		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f = int128_add_u64(f, 1); }	// balanced\n" \
 "\n" \
-"		const RNS4 u = addmod4(set4_u32(r1), mulmod4(set4_i32(r2), RBASE_4()));\n" \
+"		const RNS4 u = addmod4(set4_u32(re.s0), mulmod4(set4_i32(ri), RBASE_4()));\n" \
 "		storeRNS4(&xi[j], u);\n" \
 "	}\n" \
 "\n" \
@@ -1327,57 +1402,23 @@ static const char * const src_ocl_kernel = \
 "	storeRNS4(&xi[CARRY_LENGTH - 1], u);\n" \
 "}\n" \
 "\n" \
-"__kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))\n" \
-"void carry_mul(__global ZP * restrict const reg, __global int_128 * restrict const carry, const uint_32 reg_x, const uint_32 a)\n" \
+"INLINE void carry_3(__global ZP * restrict const xi, __global const big_type * restrict const carry, const int_32 is_nega, const sz_t id)\n" \
 "{\n" \
-"	const sz_t id = (sz_t)get_global_id(0);\n" \
-"	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];\n" \
-"	__local int_128 cl[CARRY_WG_SZ];\n" \
-"	uint2_32 r[CARRY_LENGTH];\n" \
-"\n" \
-"	carry_mul_sub_1(xi, NULL_PTR, carry, cl, r, id, a);\n" \
-"	barrier(CLK_LOCAL_MEM_FENCE);\n" \
-"	carry_2(xi, cl, r, id);\n" \
-"}\n" \
-"\n" \
-"__kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))\n" \
-"void carry_sub(__global ZP * restrict const reg, __global int_128 * restrict const carry, const uint_32 reg_x, const uint_32 reg_y)\n" \
-"{\n" \
-"	const sz_t id = (sz_t)get_global_id(0);\n" \
-"	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];\n" \
-"	__global const ZP * restrict const yi = &reg[reg_y * N_SZ + CARRY_LENGTH * id];\n" \
-"	__local int_128 cl[CARRY_WG_SZ];\n" \
-"	uint2_32 r[CARRY_LENGTH];\n" \
-"\n" \
-"	carry_mul_sub_1(xi, yi, carry, cl, r, id, 1);\n" \
-"	barrier(CLK_LOCAL_MEM_FENCE);\n" \
-"	carry_2(xi, cl, r, id);\n" \
-"}\n" \
-"\n" \
-"__kernel\n" \
-"void carry_complete(__global ZP * restrict const reg, __global const int_128 * restrict const carry, const uint_32 reg_x, const int_32 is_nega)\n" \
-"{\n" \
-"	const sz_t id = (sz_t)get_global_id(0);\n" \
-"	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * CARRY_WG_SZ * id];\n" \
-"\n" \
-"	int_128 f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];\n" \
-"	if ((id == 0) && (is_nega != 0)) f = int128_neg(f);\n" \
-"\n" \
 "	// assert CARRY_LENGTH = 4\n" \
 "	ZP4 x4[2]; for (sz_t l = 0; l < 2; ++l) x4[l] = load4g(xi, l * Z_OFFSET / 4);\n" \
 "	RNS2 y[4]; for (sz_t l = 0; l < 2; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }\n" \
 "\n" \
+"	big_type f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];\n" \
+"	if ((id == 0) && (is_nega != 0)) f = int128_neg(f);\n" \
 "	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
 "	{\n" \
 "		f = int128_add_i64(f, get_i64(y[j]));\n" \
-"		const uint_32 r1 = (uint_32)(f.s0) & (BASE - 1);\n" \
-"		f = int128_rshift(f, LBASE);\n" \
-"		int_32 r2 = (int_32)((uint_32)(f.s0) & (BASE - 1));\n" \
-"		f = int128_rshift(f, LBASE);\n" \
+"		const pck_type re = extract_r(&f);\n" \
 "\n" \
-"		if (r2 >= (int_32)(BASE / 2)) { r2 -= (int_32)(BASE); f = int128_add_u64(f, 1); }	// balanced\n" \
+"		int_32 ri = (int_32)(re.s1);\n" \
+"		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f = int128_add_u64(f, 1); }	// balanced\n" \
 "\n" \
-"		const RNS4 u = addmod4(set4_u32(r1), mulmod4(set4_i32(r2), RBASE_4()));\n" \
+"		const RNS4 u = addmod4(set4_u32(re.s0), mulmod4(set4_i32(ri), RBASE_4()));\n" \
 "		storeRNS4(&xi[j], u);\n" \
 "	}\n" \
 "\n" \
@@ -1390,116 +1431,43 @@ static const char * const src_ocl_kernel = \
 "	storeRNS4(&xi[CARRY_LENGTH - 1], u);\n" \
 "}\n" \
 "\n" \
-"#elif (PRM_COUNT == 2)\n" \
-"\n" \
-"INLINE void carry_mul_sub_1(const __global ZP * restrict const xi, __global const ZP * restrict const yi,\n" \
-"	__global int_64 * restrict const carry, __local int_64 * const cl, uint_32 r[CARRY_LENGTH], const sz_t id, const uint_32 a)\n" \
-"{\n" \
-"	// assert CARRY_LENGTH = 4\n" \
-"	ZP4 x4[2]; for (sz_t l = 0; l < 2; ++l) x4[l] = load4g(xi, l * Z_OFFSET / 4);\n" \
-"	RNS2 y[4]; for (sz_t l = 0; l < 2; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }\n" \
-"\n" \
-"	int_64 f = 0;\n" \
-"	for (sz_t j = 0; j < CARRY_LENGTH; ++j)\n" \
-"	{\n" \
-"		// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF\n" \
-"		f += get_i64(mulmod2(y[j], NORM_2())) * a;\n" \
-"		if (yi != NULL_PTR) f -= get_i32(yi[j], P1);\n" \
-"\n" \
-"		r[j] = (uint_32)(f) & (BASE - 1);\n" \
-"		f >>= LBASE;\n" \
-"	}\n" \
-"\n" \
-"	const sz_t lid = id % CARRY_WG_SZ;\n" \
-"	cl[lid] = f;\n" \
-"\n" \
-"	if (lid == CARRY_WG_SZ - 1) carry[id / CARRY_WG_SZ] = f;\n" \
-"}\n" \
-"\n" \
-"INLINE void carry_2(__global ZP * restrict const xi, const __local int_64 * const cl, const uint_32 r[CARRY_LENGTH], const sz_t id)\n" \
-"{\n" \
-"	const sz_t lid = id % CARRY_WG_SZ;\n" \
-"	int_64 f = (lid != 0) ? cl[lid - 1] : 0;\n" \
-"\n" \
-"	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
-"	{\n" \
-"		f += r[j];\n" \
-"		int_32 r1 = (int_32)((uint_32)(f) & (BASE - 1));\n" \
-"		f >>= LBASE;\n" \
-"\n" \
-"		if (r1 >= (int_32)(BASE / 2)) { r1 -= (int_32)(BASE); f += 1; }	// balanced\n" \
-"\n" \
-"		const RNS2 u = set2_i32(r1);\n" \
-"		storeRNS2(&xi[j], u);\n" \
-"	}\n" \
-"\n" \
-"	f += r[CARRY_LENGTH - 1];\n" \
-"	const int_32 r1 = (int_32)(f);\n" \
-"\n" \
-"	const RNS2 u = set2_i32(r1);\n" \
-"	storeRNS2(&xi[CARRY_LENGTH - 1], u);\n" \
-"}\n" \
+"#endif\n" \
 "\n" \
 "__kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))\n" \
-"void carry_mul(__global ZP * restrict const reg, __global int_64 * restrict const carry, const uint_32 reg_x, const uint_32 a)\n" \
+"void carry_mul(__global ZP * restrict const reg, __global big_type * restrict const carry, const uint_32 reg_x, const uint_32 a)\n" \
 "{\n" \
 "	const sz_t id = (sz_t)get_global_id(0);\n" \
 "	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];\n" \
-"	__local int_64 cl[CARRY_WG_SZ];\n" \
-"	uint_32 r[CARRY_LENGTH];\n" \
+"	__local big_type cl[CARRY_WG_SZ];\n" \
+"	pck_type r[CARRY_LENGTH];\n" \
 "\n" \
 "	carry_mul_sub_1(xi, NULL_PTR, carry, cl, r, id, a);\n" \
 "	barrier(CLK_LOCAL_MEM_FENCE);\n" \
-"	carry_2(xi, cl, r, id);\n" \
+"	carry_2(xi, cl, r, id % CARRY_WG_SZ);\n" \
 "}\n" \
 "\n" \
 "__kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))\n" \
-"void carry_sub(__global ZP * restrict const reg, __global int_64 * restrict const carry, const uint_32 reg_x, const uint_32 reg_y)\n" \
+"void carry_sub(__global ZP * restrict const reg, __global big_type * restrict const carry, const uint_32 reg_x, const uint_32 reg_y)\n" \
 "{\n" \
 "	const sz_t id = (sz_t)get_global_id(0);\n" \
 "	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * id];\n" \
 "	__global const ZP * restrict const yi = &reg[reg_y * N_SZ + CARRY_LENGTH * id];\n" \
-"	__local int_64 cl[CARRY_WG_SZ];\n" \
-"	uint_32 r[CARRY_LENGTH];\n" \
+"	__local big_type cl[CARRY_WG_SZ];\n" \
+"	pck_type r[CARRY_LENGTH];\n" \
 "\n" \
 "	carry_mul_sub_1(xi, yi, carry, cl, r, id, 1);\n" \
 "	barrier(CLK_LOCAL_MEM_FENCE);\n" \
-"	carry_2(xi, cl, r, id);\n" \
+"	carry_2(xi, cl, r, id % CARRY_WG_SZ);\n" \
 "}\n" \
 "\n" \
 "__kernel\n" \
-"void carry_complete(__global ZP * restrict const reg, __global const int_64 * restrict const carry, const uint_32 reg_x, const int_32 is_nega)\n" \
+"void carry_complete(__global ZP * restrict const reg, __global const big_type * restrict const carry, const uint_32 reg_x, const int_32 is_nega)\n" \
 "{\n" \
 "	const sz_t id = (sz_t)get_global_id(0);\n" \
 "	__global ZP * restrict const xi = &reg[reg_x * N_SZ + CARRY_LENGTH * CARRY_WG_SZ * id];\n" \
 "\n" \
-"	int_64 f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];\n" \
-"	if ((id == 0) && (is_nega != 0)) f = -f;\n" \
-"\n" \
-"	// assert CARRY_LENGTH = 4\n" \
-"	const ZP4 x4 = load4g(xi, 0 * Z_OFFSET / 4);\n" \
-"	ZP y[4]; y[0] = x4.s0; y[1] = x4.s1; y[2] = x4.s2; y[3] = x4.s3;\n" \
-"\n" \
-"	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
-"	{\n" \
-"		f += get_i32(y[j], P1);\n" \
-"		int_32 r1 = (int_32)((uint_32)(f) & (BASE - 1));\n" \
-"		f >>= LBASE;\n" \
-"\n" \
-"		if (r1 >= (int_32)(BASE / 2)) { r1 -= (int_32)(BASE); f += 1; }	// balanced\n" \
-"\n" \
-"		const RNS2 u = set2_i32(r1);\n" \
-"		storeRNS2(&xi[j], u);\n" \
-"	}\n" \
-"\n" \
-"	f += get_i32(y[CARRY_LENGTH - 1], P1);\n" \
-"	const int_32 r1 = (int_32)(f);\n" \
-"\n" \
-"	const RNS2 u = set2_i32(r1);\n" \
-"	storeRNS2(&xi[CARRY_LENGTH - 1], u);\n" \
+"	carry_3(xi, carry, is_nega, id);\n" \
 "}\n" \
-"\n" \
-"#endif\n" \
 "\n" \
 "// --- strict modulo ---\n" \
 "\n" \

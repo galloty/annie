@@ -50,7 +50,7 @@ template<int LN>
 class engine : public device
 {
 private:
-	const size_t _prm_count, _rho;
+	const size_t _prm_count, _pck_factor;
 
 	cl_mem _reg, _carry;
 
@@ -77,7 +77,7 @@ private:
 	static constexpr int _carry_shift[24] = { 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8 };
 
 public:
-	engine(const size_t device_id, const size_t prm_count, const size_t rho) : device(platform(), device_id), _prm_count(prm_count), _rho(rho) {}
+	engine(const size_t device_id, const size_t prm_count, const size_t pck_factor) : device(platform(), device_id), _prm_count(prm_count), _pck_factor(pck_factor) {}
 	virtual ~engine() {}
 
 	int get_carry_shift() const { return _carry_shift[LN]; }
@@ -97,7 +97,7 @@ public:
 		const size_t n = size_t(1) << LN;
 		const size_t size = _prm_count * n * sizeof(ZP);
 		const size_t reg_size = reg_count * size;
-		const size_t carry_size = n / CARRY_LENGTH * _rho * sizeof(int_64);
+		const size_t carry_size = n / CARRY_LENGTH * _pck_factor * sizeof(int_64);
 		if (getMaxMemAllocSize() < reg_size)
 		{
 			std::cerr << "Warning: trying to allocate " << reg_size / (1u << 20)

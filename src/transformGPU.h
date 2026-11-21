@@ -228,7 +228,7 @@ private:
 	static const size_t Reg_w_R = 3, Reg_w_Q = 4, Reg_N_Q = 5, Reg_Ninv_R = 6, Reg_t_Q = 7, Reg_t = 8, Reg_one = 9, Reg_count = 10;
 	engine<LN> _engine;
 	const int _lbase;
-	const size_t _prm_count, _rho;
+	const size_t _prm_count, _pck_factor;
 	bool _init_failed = false;
 	mpz_t _Nz;
 	ZP * _buf = nullptr;
@@ -268,7 +268,7 @@ private:
 		const size_t x_size = mpz_size(x);
 		const mp_limb_t * const x_ptr = mpz_limbs_read(x);
 
-		if (_rho == 1)
+		if (_prm_count == 2)
 		{
 			size_t bit_index = 0;
 			for (size_t i = 0; i < n; ++i)
@@ -278,7 +278,7 @@ private:
 				for (size_t l = 0; l < 2; ++l) buf[l * n + i] = ZP(r);
 			}
 		}
-		else if (_rho == 2)
+		else if (_prm_count == 4)
 		{
 			const RNS4 rbase = RNS4(1u << lbase).toMonty();
 			size_t bit_index = 0;
@@ -299,18 +299,19 @@ private:
 	void get_mpz(mpz_t & y, const size_t reg_x)
 	{
 		const size_t n = size_t(1) << LN;
-		const int lbase = _lbase, lbase_rho = int(_rho) * lbase;
+		const int lbase = _lbase, lbase_pck = int(_pck_factor) * lbase;
 		const uint_32 base = 1u << lbase;
 		ZP * const buf = _buf;
 
-		for (size_t l = 0; l < _prm_count / 2; ++l) _engine.read_memory(l * Reg_count + reg_x, &buf[l * n]);
+		_engine.read_memory(0 * Reg_count + reg_x, &buf[0 * n]);
+		if (_prm_count > 2) _engine.read_memory(1 * Reg_count + reg_x, &buf[1 * n]);
 
-		const size_t y_size = (size_t(lbase_rho) << LN) / 64 + 2;
+		const size_t y_size = (size_t(lbase_pck) << LN) / 64 + 2;
 		mp_limb_t * const y_ptr = mpz_limbs_write(y, mp_size_t(y_size));
 		for (size_t i = 0; i < y_size; ++i) y_ptr[i] = 0;
 
 		int_64 f = 0;
-		if (_rho == 1)
+		if (_prm_count == 2)
 		{
 			size_t bit_index = 0;
 			for (size_t i = 0; i < n; ++i)
@@ -323,7 +324,7 @@ private:
 				bit_index += size_t(lbase);
 			}
 		}
-		else if (_rho == 2)
+		else
 		{
 			size_t bit_index = 0;
 			for (size_t i = 0; i < n; ++i)
@@ -348,7 +349,7 @@ private:
 		if (f != 0)
 		{
 			mpz_t t; mpz_init_set_si(t, long(f));
-			mpz_mul_2exp(t, t, mp_bitcnt_t(lbase_rho) << LN);
+			mpz_mul_2exp(t, t, mp_bitcnt_t(lbase_pck) << LN);
 			mpz_add(y, y, t);
 			mpz_clear(t);
 		}
@@ -551,17 +552,17 @@ public:
 	}
 
 public:
-	transformGPU(const mpz_t & N, const size_t device_id, const int lbase, const size_t prm_count, const size_t rho)
-		: transform(), _engine(device_id, prm_count, rho), _lbase(lbase), _prm_count(prm_count), _rho(rho)
+	transformGPU(const mpz_t & N, const size_t device_id, const int lbase, const size_t prm_count, const size_t pck_factor)
+		: transform(), _engine(device_id, prm_count, pck_factor), _lbase(lbase), _prm_count(prm_count), _pck_factor(pck_factor)
 	{
 		mpz_t R, t; mpz_inits(_Nz, R, t, nullptr);
 
 		const size_t n = size_t(1) << LN;
-		const mp_bitcnt_t lbase_rho = mp_bitcnt_t(rho) * mp_bitcnt_t(lbase);
+		const mp_bitcnt_t lbase_pck = mp_bitcnt_t(pck_factor) * mp_bitcnt_t(lbase);
 
 		_buf = new ZP[prm_count * n];
 
-		mpz_set_ui(R, 1); mpz_mul_2exp(R, R, lbase_rho << LN); mpz_sub_ui(R, R, 1);
+		mpz_set_ui(R, 1); mpz_mul_2exp(R, R, lbase_pck << LN); mpz_sub_ui(R, R, 1);
 		if (mpz_invert(t, N, R) == 0)
 		{
 			mpz_gcd(_Nz, N, R);
@@ -576,7 +577,7 @@ public:
 		src << "#define N_SZ\t" << n << "u" << std::endl;
 		src << "#define LBASE\t" << lbase << std::endl;
 		src << "#define PRM_COUNT\t" << prm_count << std::endl;
-		src << "#define RHO\t" << rho << std::endl;
+		src << "#define PCK_FACTOR\t" << pck_factor << std::endl;
 
 		src << "#define P1\t" << ZP1::P() << "u" << std::endl;
 		src << "#define Q1\t" << ZP1::Q() << "u" << std::endl;
@@ -616,7 +617,7 @@ public:
 			src << "#define NORM4\t" << ZP4::norm(LN - 1).get() << "u" << std::endl;
 		}
 
-		if (rho >= 2)
+		if (pck_factor >= 2)
 		{
 			const RNS4 rbase = RNS4(1u << lbase).toMonty();
 			for (size_t l = 0; l < 4; ++l) src << "#define RBASE" << l + 1 << "\t" << rbase.get_r(l).get() << "u" << std::endl;
@@ -719,7 +720,7 @@ public:
 	std::string get_info_short() const override
 	{
 		const size_t n = size_t(1) << LN;
-		std::ostringstream ss; ss << "length " << n << "x" << _rho << "x" << _lbase << " bits";
+		std::ostringstream ss; ss << "length " << n << "x" << _pck_factor << "x" << _lbase << " bits";
 		return (ss.str());
 	}
 
@@ -730,15 +731,15 @@ public:
 	}
 };
 
-inline void get_n_base(int & rln, int & rlbase, const int rho, const double log2_16aN, const double p_2a)
+inline void get_n_base(int & rln, int & rlbase, const int pck_factor, const double log2_16aN, const double p_2a)
 {
-	for (int lbase = 31; lbase >= 1; --lbase)
+	for (int lbase = 31; lbase >= 2; --lbase)
 	{
 		// log2(base^n) = lbase * n
-		int ln = 4; while (double(lbase) * rho * std::pow(2.0, ln) < log2_16aN) ++ln;
+		int ln = 4; while (double(lbase * pck_factor) * (1 << ln) < log2_16aN) ++ln;
 
 		// A necessary condition is a * n * (base - 1)^2 < Prod_i(Pi) / 2
-		const double dbase = std::pow(2.0, lbase * rho);
+		const double dbase = std::pow(2.0, lbase * pck_factor);
 		if ((1 << ln) * (dbase - 1) * (dbase - 1) < p_2a)
 		{
 			rln = ln;
@@ -750,62 +751,30 @@ inline void get_n_base(int & rln, int & rlbase, const int rho, const double log2
 
 inline transform * create_transformGPU(const mpz_t & N, const int32_t a, const size_t device_id)
 {
-		// R = base^n - 1, Q = base^n + 1 such that base^n > 16 * a * N and n is a power of two
+	// R = base^n - 1, Q = base^n + 1 such that base^n > 16 * a * N and n is a power of two
 	long e_n; const double m_n = mpz_get_d_2exp(&e_n, N);
 	const double log2_16aN = std::log2(16.0 * a) + std::log2(m_n) + e_n;
 
-	// const double p_2a4 = ZP1::P() * double(ZP2::P()) * double(ZP3::P()) * double(ZP4::P()) / 2 / a;
-	// int ln4 = 0, lbase4 = 0; get_n_base(ln4, lbase4, 2, log2_16aN, p_2a4);
-	// const double p_2a3 = ZP1::P() * double(ZP2::P()) * double(ZP3::P()) / 2 / a;
-	// int ln3 = 0, lbase3 = 0; get_n_base(ln3, lbase3, 2, log2_16aN, p_2a3);
-	// const double p_2a2 = ZP1::P() * double(ZP2::P()) / 2 / a;
-	// int ln2 = 0, lbase2 = 0; get_n_base(ln2, lbase2, 1, log2_16aN, p_2a2);
+	const double p_2a2 = ZP1::P() * double(ZP2::P()) / 2 / a;
+	int ln2 = 0, lbase2 = 0; get_n_base(ln2, lbase2, 1, log2_16aN, p_2a2);
+	const double p_2a3 = p_2a2 * double(ZP3::P());
+	int ln3 = 0, lbase3 = 0; get_n_base(ln3, lbase3, 2, log2_16aN, p_2a3);
+	const double p_2a4 = p_2a3 * double(ZP4::P());
+	int ln4 = 0, lbase4 = 0; get_n_base(ln4, lbase4, 2, log2_16aN, p_2a4);
 
-	// const double c4 = 4 * double(1u << ln4) * ln4;
-	// const double c3 = 3 * double(1u << ln3) * ln3;
 	// const double c2 = 2 * double(1u << ln2) * ln2;
-	// std::cout << "K = " << 4 << ": ln = " << ln4 << ", lbase = " << lbase4 << ", rho = " << 2 << ", K*n*ln = " << c4 << std::endl;
-	// std::cout << "K = " << 3 << ": ln = " << ln3 << ", lbase = " << lbase3 << ", rho = " << 2 << ", K*n*ln = " << c3 << std::endl;
-	// std::cout << "K = " << 2 << ": ln = " << ln2 << ", lbase = " << lbase2 << ", rho = " << 1 << ", K*n*ln = " << c2 << std::endl;
+	// const double c3 = 3 * double(1u << ln3) * ln3;
+	// const double c4 = 4 * double(1u << ln4) * ln4;
+	// std::cout << "K = " << 2 << ": ln = " << ln2 << ", lbase = " << lbase2 << ", r = " << 1 << ", K*n*ln = " << c2 << std::endl;
+	// std::cout << "K = " << 3 << ": ln = " << ln3 << ", lbase = " << lbase3 << ", r = " << 2 << ", K*n*ln = " << c3 << std::endl;
+	// std::cout << "K = " << 4 << ": ln = " << ln4 << ", lbase = " << lbase4 << ", r = " << 2 << ", K*n*ln = " << c4 << std::endl;
 	// return nullptr;
 
-	const size_t prm_count = 2, rho = 1;
+	const size_t prm_count = 2, pck_factor = 1;
+	int ln = ln2, lbase = lbase2;
 
-	int ln, lbase = 0;
-	if (rho == 2)
-	{
-		const double p_2a = ZP1::P() * double(ZP2::P()) * double(ZP3::P()) * double(ZP4::P()) / 2 / a;
-		for (int lbase2 = 62; lbase2 >= 2; lbase2 -= 2)
-		{
-			// log2(base^n) = lbase * n
-			ln = 4; while (double(lbase2) * (1 << ln) < log2_16aN) ++ln;
-
-			// A necessary condition is a * n * (base - 1)^2 < Prod_i(Pi) / 2
-			const double dbase2 = double(uint64_t(1) << lbase2);
-			if ((1 << ln) * (dbase2 - 1) * (dbase2 - 1) < p_2a)
-			{
-				lbase = lbase2 / 2;
-				break;
-			}
-		}
-	}
-	else if (rho == 1)
-	{
-		const double p_2a = ZP1::P() * double(ZP2::P()) / 2 / a;
-		for (int lbase1 = 31; lbase1 >= 2; --lbase1)
-		{
-			// log2(base^n) = lbase * n
-			ln = 4; while (double(lbase1) * (1 << ln) < log2_16aN) ++ln;
-
-			// A necessary condition is a * n * (base - 1)^2 < Prod_i(Pi) / 2
-			const double dbase = double(1u << lbase1);
-			if ((1 << ln) * (dbase - 1) * (dbase - 1) < p_2a)
-			{
-				lbase = lbase1;
-				break;
-			}
-		}
-	}
+	// const size_t prm_count = 4, pck_factor = 2;
+	// int ln = ln4, lbase = lbase4;
 
 #if defined(QUICK_TEST)
 	if (ln < 4) throw std::runtime_error("NTT size < 2^4 is not supported");
@@ -817,27 +786,27 @@ inline transform * create_transformGPU(const mpz_t & N, const int32_t a, const s
 	transform * p_transform = nullptr;
 
 #if defined(QUICK_TEST)
-	if      (ln ==  4) p_transform = new transformGPU<4>(N, device_id, lbase, prm_count, rho);
-	else if (ln ==  5) p_transform = new transformGPU<5>(N, device_id, lbase, prm_count, rho);
-	else if (ln ==  6) p_transform = new transformGPU<6>(N, device_id, lbase, prm_count, rho);
-	else if (ln ==  7) p_transform = new transformGPU<7>(N, device_id, lbase, prm_count, rho);
-	else if (ln ==  8) p_transform = new transformGPU<8>(N, device_id, lbase, prm_count, rho);
-	else if (ln ==  9) p_transform = new transformGPU<9>(N, device_id, lbase, prm_count, rho);
+	if      (ln ==  4) p_transform = new transformGPU<4>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln ==  5) p_transform = new transformGPU<5>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln ==  6) p_transform = new transformGPU<6>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln ==  7) p_transform = new transformGPU<7>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln ==  8) p_transform = new transformGPU<8>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln ==  9) p_transform = new transformGPU<9>(N, device_id, lbase, prm_count, pck_factor);
 #endif
-	if      (ln == 10) p_transform = new transformGPU<10>(N, device_id, lbase, prm_count, rho);
-	else if (ln == 11) p_transform = new transformGPU<11>(N, device_id, lbase, prm_count, rho);
-	else if (ln == 12) p_transform = new transformGPU<12>(N, device_id, lbase, prm_count, rho);
-	else if (ln == 13) p_transform = new transformGPU<13>(N, device_id, lbase, prm_count, rho);
-	else if (ln == 14) p_transform = new transformGPU<14>(N, device_id, lbase, prm_count, rho);
-	else if (ln == 15) p_transform = new transformGPU<15>(N, device_id, lbase, prm_count, rho);
-	else if (ln == 16) p_transform = new transformGPU<16>(N, device_id, lbase, prm_count, rho);
-	else if (ln == 17) p_transform = new transformGPU<17>(N, device_id, lbase, prm_count, rho);
-	else if (ln == 18) p_transform = new transformGPU<18>(N, device_id, lbase, prm_count, rho);
-	else if (ln == 19) p_transform = new transformGPU<19>(N, device_id, lbase, prm_count, rho);
-	else if (ln == 20) p_transform = new transformGPU<20>(N, device_id, lbase, prm_count, rho);
-	else if (ln == 21) p_transform = new transformGPU<21>(N, device_id, lbase, prm_count, rho);
-	else if (ln == 22) p_transform = new transformGPU<22>(N, device_id, lbase, prm_count, rho);
-	else if (ln == 23) p_transform = new transformGPU<23>(N, device_id, lbase, prm_count, rho);
+	if      (ln == 10) p_transform = new transformGPU<10>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln == 11) p_transform = new transformGPU<11>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln == 12) p_transform = new transformGPU<12>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln == 13) p_transform = new transformGPU<13>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln == 14) p_transform = new transformGPU<14>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln == 15) p_transform = new transformGPU<15>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln == 16) p_transform = new transformGPU<16>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln == 17) p_transform = new transformGPU<17>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln == 18) p_transform = new transformGPU<18>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln == 19) p_transform = new transformGPU<19>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln == 20) p_transform = new transformGPU<20>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln == 21) p_transform = new transformGPU<21>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln == 22) p_transform = new transformGPU<22>(N, device_id, lbase, prm_count, pck_factor);
+	else if (ln == 23) p_transform = new transformGPU<23>(N, device_id, lbase, prm_count, pck_factor);
 
 	return p_transform;
 }
