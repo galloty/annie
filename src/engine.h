@@ -12,21 +12,21 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #include "ocl.h"
 
-typedef cl_uint		uint32;
-typedef cl_int		int32;
-typedef cl_ulong	uint64;
-typedef cl_long		int64;
+typedef cl_uint		uint_32;
+typedef cl_int		int_32;
+typedef cl_ulong	uint_64;
+typedef cl_long		int_64;
 
 class ZP
 {
 protected:
-	uint32 _n;
+	uint_32 _n;
 
 public:
 	ZP() {}
-	explicit ZP(const uint32 n) : _n(n) {}
+	explicit ZP(const uint_32 n) : _n(n) {}
 
-	uint32 get() const { return _n; }
+	uint_32 get() const { return _n; }
 };
 
 #define	CARRY_LENGTH	4u
@@ -50,6 +50,8 @@ template<int LN>
 class engine : public device
 {
 private:
+	const size_t _prm_count, _rho;
+
 	cl_mem _reg, _carry;
 
 	cl_kernel _forward8 = nullptr, _backward8 = nullptr, _forward8_0 = nullptr, _backward8_0 = nullptr;
@@ -65,7 +67,7 @@ private:
 	cl_kernel _fwd256 = nullptr, _fwd512 = nullptr, _fwd1024 = nullptr, _fwd2048 = nullptr;
 	cl_kernel _carry_mul = nullptr, _carry_sub = nullptr, _carry_complete = nullptr;
 	cl_kernel _mod_Q = nullptr, _mod_R_add2 = nullptr;
-	cl_kernel _set = nullptr, _extend = nullptr;
+	cl_kernel _set = nullptr;
 
 	std::vector<cl_kernel> _kernels;
 
@@ -75,7 +77,7 @@ private:
 	static constexpr int _carry_shift[24] = { 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8 };
 
 public:
-	engine(const size_t device_id) : device(platform(), device_id) {}
+	engine(const size_t device_id, const size_t prm_count, const size_t rho) : device(platform(), device_id), _prm_count(prm_count), _rho(rho) {}
 	virtual ~engine() {}
 
 	int get_carry_shift() const { return _carry_shift[LN]; }
@@ -93,9 +95,9 @@ public:
 		std::cout << "Alloc gpu memory." << std::endl;
 #endif
 		const size_t n = size_t(1) << LN;
-		const size_t size = 2 * n * sizeof(ZP);
+		const size_t size = _prm_count * n * sizeof(ZP);
 		const size_t reg_size = reg_count * size;
-		const size_t carry_size = n / CARRY_LENGTH * sizeof(int64);
+		const size_t carry_size = n / CARRY_LENGTH * _rho * sizeof(int_64);
 		if (getMaxMemAllocSize() < reg_size)
 		{
 			std::cerr << "Warning: trying to allocate " << reg_size / (1u << 20)
@@ -236,7 +238,6 @@ public:
 		CREATE_KERNEL(mod_R_add2);
 
 		CREATE_KERNEL(set);
-		CREATE_KERNEL(extend);
 	}
 
 	void release_kernels()
@@ -270,24 +271,24 @@ public:
 private:
 	void execute_kernel(cl_kernel & kernel, const size_t reg_x, const size_t reg_w, const size_t wg_size = 0)
 	{
-		const uint32 rx = uint32(reg_x), rw = uint32(reg_w);
-		_setKernelArg(kernel, 1, sizeof(uint32), &rx);
-		_setKernelArg(kernel, 2, sizeof(uint32), &rw);
-		_executeKernel(kernel, 2u << (LN - 3), wg_size);
+		const uint_32 rx = uint_32(reg_x), rw = uint_32(reg_w);
+		_setKernelArg(kernel, 1, sizeof(uint_32), &rx);
+		_setKernelArg(kernel, 2, sizeof(uint_32), &rw);
+		_executeKernel(kernel, _prm_count << (LN - 3), wg_size);
 	}
 
 	void execute_kernel_fb(cl_kernel & kernel, const size_t reg_x, const size_t reg_w, const int lm, const size_t s, const size_t wg_size = 0)
 	{
-		const int32 lm32 = int32(lm); const uint32 s32 = uint32(s);
-		_setKernelArg(kernel, 3, sizeof(int32), &lm32);
-		_setKernelArg(kernel, 4, sizeof(uint32), &s32);
+		const int_32 lm32 = int_32(lm); const uint_32 s32 = uint_32(s);
+		_setKernelArg(kernel, 3, sizeof(int_32), &lm32);
+		_setKernelArg(kernel, 4, sizeof(uint_32), &s32);
 		execute_kernel(kernel, reg_x, reg_w, wg_size);
 	}
 
 	void execute_kernel_mul(cl_kernel & kernel, const size_t reg_x, const size_t reg_xp, const size_t reg_w, const size_t wg_size = 0)
 	{
-		const uint32 rxp = uint32(reg_xp);
-		_setKernelArg(kernel, 3, sizeof(uint32), &rxp);
+		const uint_32 rxp = uint_32(reg_xp);
+		_setKernelArg(kernel, 3, sizeof(uint_32), &rxp);
 		execute_kernel(kernel, reg_x, reg_w, wg_size);
 	}
 
@@ -347,55 +348,50 @@ public:
 		else if ((LN == 20) || (LN == 23)) execute_kernel(_fwd2048, reg_x, reg_w, 2048 / 8 * BLK2048);
 	}
 
-	void carry_mul(const size_t reg_x, const int32 a)
+	void carry_mul(const size_t reg_x, const uint_32 a)
 	{
-		const uint32 rx = uint32(reg_x);
-		_setKernelArg(_carry_mul, 2, sizeof(uint32), &rx);
-		_setKernelArg(_carry_mul, 3, sizeof(int32), &a);
+		const uint_32 rx = uint_32(reg_x);
+		_setKernelArg(_carry_mul, 2, sizeof(uint_32), &rx);
+		_setKernelArg(_carry_mul, 3, sizeof(uint_32), &a);
 		_executeKernel(_carry_mul, (1u << LN) / CARRY_LENGTH, 1u << _carry_shift[LN]);
 	}
 
 	void carry_sub(const size_t reg_x, const size_t reg_y)
 	{
-		const uint32 rx = uint32(reg_x), ry = uint32(reg_y);
-		_setKernelArg(_carry_sub, 2, sizeof(uint32), &rx);
-		_setKernelArg(_carry_sub, 3, sizeof(uint32), &ry);
+		const uint_32 rx = uint_32(reg_x), ry = uint_32(reg_y);
+		_setKernelArg(_carry_sub, 2, sizeof(uint_32), &rx);
+		_setKernelArg(_carry_sub, 3, sizeof(uint_32), &ry);
 		_executeKernel(_carry_sub, (1u << LN) / CARRY_LENGTH, 1u << _carry_shift[LN]);
 	}
 
 	void carry_complete(const size_t reg_x, const bool nega)
 	{
-		const uint32 rx = uint32(reg_x); const int32 is_nega = nega ? 1 : 0;
-		_setKernelArg(_carry_complete, 2, sizeof(uint32), &rx);
-		_setKernelArg(_carry_complete, 3, sizeof(int32), &is_nega);
+		const uint_32 rx = uint_32(reg_x); const int_32 is_nega = nega ? 1 : 0;
+		_setKernelArg(_carry_complete, 2, sizeof(uint_32), &rx);
+		_setKernelArg(_carry_complete, 3, sizeof(int_32), &is_nega);
 		_executeKernel(_carry_complete, ((1u << LN) / CARRY_LENGTH) >> _carry_shift[LN]);
 	}
 
 	void mod_Q(const size_t reg_x)
 	{
-		const uint32 rx = uint32(reg_x);
-		_setKernelArg(_mod_Q, 1, sizeof(uint32), &rx);
+		const uint_32 rx = uint_32(reg_x);
+		_setKernelArg(_mod_Q, 1, sizeof(uint_32), &rx);
 		_executeKernel(_mod_Q, 1);
 	}
 
 	void mod_R_add2(const size_t reg_x)
 	{
-		const uint32 rx = uint32(reg_x);
-		_setKernelArg(_mod_R_add2, 1, sizeof(uint32), &rx);
+		const uint_32 rx = uint_32(reg_x);
+		_setKernelArg(_mod_R_add2, 1, sizeof(uint_32), &rx);
 		_executeKernel(_mod_R_add2, 1);
 	}
 
 	void set(const size_t reg_y, const size_t reg_x)
 	{
 		if (reg_x == reg_y) return;
-		const uint32 ry = uint32(reg_y), rx = uint32(reg_x);
-		_setKernelArg(_set, 1, sizeof(uint32), &ry);
-		_setKernelArg(_set, 2, sizeof(uint32), &rx);
+		const uint_32 ry = uint_32(reg_y), rx = uint_32(reg_x);
+		_setKernelArg(_set, 1, sizeof(uint_32), &ry);
+		_setKernelArg(_set, 2, sizeof(uint_32), &rx);
 		_executeKernel(_set, 1u << (LN - 2));
-	}
-
-	void extend01()
-	{
-		_executeKernel(_extend, 2u << (LN - 2));	// Reg0 & Reg1
 	}
 };

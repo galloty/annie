@@ -115,7 +115,7 @@ private:
 #endif
 
 		std::ostringstream ss;
-		ss << "annie version 26.11.0 (" << sysver << ssc.str() << ")" << std::endl;
+		ss << "annie version 26.11.0.dev (" << sysver << ssc.str() << ")" << std::endl;
 		ss << "Copyright (c) 2026, Yves Gallot" << std::endl;
 		ss << "annie is free source code, under the MIT license." << std::endl;
 		ss << ":) developed by a human not by AI" << std::endl;
