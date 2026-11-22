@@ -585,44 +585,42 @@ public:
 		src << "#define P2\t" << ZP2::P() << "u" << std::endl;
 		src << "#define Q2\t" << ZP2::Q() << "u" << std::endl;
 		src << "#define RSQ2\t" << ZP2::rsq().get() << "u" << std::endl;
+		src << "#define P3\t" << ZP3::P() << "u" << std::endl;
+		src << "#define Q3\t" << ZP3::Q() << "u" << std::endl;
+		src << "#define RSQ3\t" << ZP3::rsq().get() << "u" << std::endl;
+		src << "#define P4\t" << ZP4::P() << "u" << std::endl;
+		src << "#define Q4\t" << ZP4::Q() << "u" << std::endl;
+		src << "#define RSQ4\t" << ZP4::rsq().get() << "u" << std::endl;
+
+		// Not converted into Montgomery form such that output is converted out of MF
+		const RNS4 norm = RNS4::norm(LN - 1);
+		src << "__constant uint g_norm[" << prm_count << "] = { " << norm.get_r(0).get() << "u";
+		for (size_t l = 1; l < prm_count; ++l) src << ", " << norm.get_r(l).get() << "u";
+		src << " };" << std::endl;
+
+		const RNS4 rbase = RNS4(1u << lbase).toMonty();
+		src << "__constant uint g_base[" << prm_count << "] = { " << rbase.get_r(0).get() << "u";
+		for (size_t l = 1; l < prm_count; ++l) src << ", " << rbase.get_r(l).get() << "u";
+		src << " };" << std::endl;
+
+		RNS4 rbase_S = RNS4(1u << lbase); for (size_t l = 1; l < pck_factor; ++l) rbase_S *= rbase;
+		src << "__constant uint g_baseS[" << prm_count << "] = { " << rbase_S.get_r(0).get() << "u";
+		for (size_t l = 1; l < prm_count; ++l) src << ", " << rbase_S.get_r(l).get() << "u";
+		src << " };" << std::endl;
 
 		src << "#define INVP2_P1\t" << ZP1(ZP2::P()).toMonty().invert().get() << "u" << std::endl;
 
-		// Not converted into Montgomery form such that output is converted out of MF
-		src << "#define NORM1\t" << ZP1::norm(LN - 1).get() << "u" << std::endl;
-		src << "#define NORM2\t" << ZP2::norm(LN - 1).get() << "u" << std::endl;
-
+		// TODO use RNS4 type
 		if (prm_count >= 3)
 		{
-			src << "#define P3\t" << ZP3::P() << "u" << std::endl;
-			src << "#define Q3\t" << ZP3::Q() << "u" << std::endl;
-			src << "#define RSQ3\t" << ZP3::rsq().get() << "u" << std::endl;
-
 			src << "#define INVP3_P1\t" << ZP1(ZP3::P()).toMonty().invert().get() << "u" << std::endl;
 			src << "#define INVP3_P2\t" << ZP2(ZP3::P()).toMonty().invert().get() << "u" << std::endl;
-
-			src << "#define NORM3\t" << ZP3::norm(LN - 1).get() << "u" << std::endl;
 		}
-
 		if (prm_count >= 4)
 		{
-			src << "#define P4\t" << ZP4::P() << "u" << std::endl;
-			src << "#define Q4\t" << ZP4::Q() << "u" << std::endl;
-			src << "#define RSQ4\t" << ZP4::rsq().get() << "u" << std::endl;
-
 			src << "#define INVP4_P1\t" << ZP1(ZP4::P()).toMonty().invert().get() << "u" << std::endl;
 			src << "#define INVP4_P2\t" << ZP2(ZP4::P()).toMonty().invert().get() << "u" << std::endl;
 			src << "#define INVP4_P3\t" << ZP3(ZP4::P()).toMonty().invert().get() << "u" << std::endl;
-
-			src << "#define NORM4\t" << ZP4::norm(LN - 1).get() << "u" << std::endl;
-		}
-
-		if (pck_factor >= 2)
-		{
-			const RNS4 rbase = RNS4(1u << lbase).toMonty();
-			for (size_t l = 0; l < 4; ++l) src << "#define RBASE" << l + 1 << "\t" << rbase.get_r(l).get() << "u" << std::endl;
-			const RNS4 rbase2 = RNS4(1u << lbase) * rbase;
-			for (size_t l = 0; l < 4; ++l) src << "#define RBASESQ" << l + 1 << "\t" << rbase2.get_r(l).get() << "u" << std::endl;
 		}
 
 		src << "#define CARRY_LENGTH\t" << CARRY_LENGTH << "u"  << std::endl;
