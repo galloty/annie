@@ -89,14 +89,15 @@ INLINE ZP submod(const ZP lhs, const ZP rhs, const ZP p)
 	return lhs - rhs + ((lhs < rhs) ? p : 0);
 }
 
-// 2 mul + 2 mul_hi
-INLINE ZP mulmod(const ZP lhs, const ZP rhs, const ZP2 pq)	// TODO other formula => const
+// Montgomery multiplication by a constant: 1 mul + 2 mul_hi
+INLINE ZP mulmod_const(const ZP lhs, const ZP rhs, const ZP rhs_q, const uint_32 p)
 {
-	const uint_64 t = lhs * (uint_64)(rhs);
-	const uint_32 lo = (uint_32)(t), hi = (uint_32)(t >> 32);
-	const uint_32 mp = mul_hi(lo * pq.s1, pq.s0);
-	return submod(hi, mp, pq.s0);
+	const uint_32 mp = mul_hi(lhs * rhs_q, p);
+	return submod(mul_hi(lhs, rhs), mp, p);
 }
+
+// Montgomery multiplication: 2 mul + 2 mul_hi
+INLINE ZP mulmod(const ZP lhs, const ZP rhs, const ZP2 pq) { return mulmod_const(lhs, rhs, rhs * pq.s1, pq.s0); }
 
 INLINE ZP submulmod(const ZP lhs, const ZP rhs, const ZP m, const ZP2 pq)
 {
@@ -158,36 +159,48 @@ INLINE void storeRNS_S(__global ZP * restrict const x, const RNS_S r) { for (sz_
 	x1 = submod(x0, t, pq.s0); x0 = addmod(x0, t, pq.s0); \
 }
 
+#define FWD2_CONST(x0, x1, w, w_q) \
+{ \
+	const ZP t = mulmod_const(x1, w, w_q, pq.s0); \
+	x1 = submod(x0, t, pq.s0); x0 = addmod(x0, t, pq.s0); \
+}
+
 #define BCK2(x0, x1, w_i) \
 { \
 	const ZP t = submod(x0, x1, pq.s0); x0 = addmod(x0, x1, pq.s0); \
 	x1 = mulmod(t, w_i, pq); \
 }
 
-#define SQR2(x0, x1, w) \
+#define BCK2_CONST(x0, x1, w_i, w_i_q) \
 { \
-	const ZP t = mulmod(mulmod(x1, x1, pq), w, pq); \
+	const ZP t = submod(x0, x1, pq.s0); x0 = addmod(x0, x1, pq.s0); \
+	x1 = mulmod_const(t, w_i, w_i_q, pq.s0); \
+}
+
+#define SQR2(x0, x1, w, w_q) \
+{ \
+	const ZP t = mulmod_const(mulmod(x1, x1, pq), w, w_q, pq.s0); \
 	x1 = mulmod(addmod(x0, x0, pq.s0), x1, pq); \
 	x0 = addmod(mulmod(x0, x0, pq), t, pq.s0); \
 }
 
-#define SQR2N(x0, x1, w) \
+#define SQR2N(x0, x1, w, w_q) \
 { \
-	const ZP t = mulmod(mulmod(x1, x1, pq), w, pq); \
+	const ZP t = mulmod_const(mulmod(x1, x1, pq), w, w_q, pq.s0); \
 	x1 = mulmod(addmod(x0, x0, pq.s0), x1, pq); \
 	x0 = submod(mulmod(x0, x0, pq), t, pq.s0); \
 }
 
-#define MUL2(x0, x1, xp0, xp1, w) \
+#define MUL2(x0, x1, xp0, xp1, w, w_q) \
 { \
-	const ZP t = mulmod(mulmod(x1, xp1, pq), w, pq); \
+	const ZP t = mulmod_const(mulmod(x1, xp1, pq), w, w_q, pq.s0); \
 	x1 = addmod(mulmod(x0, xp1, pq), mulmod(xp0, x1, pq), pq.s0); \
 	x0 = addmod(mulmod(x0, xp0, pq), t, pq.s0); \
 }
 
-#define MUL2N(x0, x1, xp0, xp1, w) \
+#define MUL2N(x0, x1, xp0, xp1, w, w_q) \
 { \
-	const ZP t = mulmod(mulmod(x1, xp1, pq), w, pq); \
+	const ZP t = mulmod_const(mulmod(x1, xp1, pq), w, w_q, pq.s0); \
 	x1 = addmod(mulmod(x0, xp1, pq), mulmod(xp0, x1, pq), pq.s0); \
 	x0 = submod(mulmod(x0, xp0, pq), t, pq.s0); \
 }
@@ -196,16 +209,28 @@ INLINE void storeRNS_S(__global ZP * restrict const x, const RNS_S r) { for (sz_
 
 INLINE void _forward8(const ZP2 pq, ZP x[8], const ZP w1, const ZP2 w2, const ZP4 w4)
 {
-	FWD2(x[0], x[4], w1); FWD2(x[1], x[5], w1); FWD2(x[2], x[6], w1); FWD2(x[3], x[7], w1);
-	FWD2(x[0], x[2], w2.s0); FWD2(x[1], x[3], w2.s0); FWD2(x[4], x[6], w2.s1); FWD2(x[5], x[7], w2.s1);
-	FWD2(x[0], x[1], w4.s0); FWD2(x[2], x[3], w4.s1); FWD2(x[4], x[5], w4.s2); FWD2(x[6], x[7], w4.s3);
+	const ZP w1_q = w1 * pq.s1;
+	FWD2_CONST(x[0], x[4], w1, w1_q); FWD2_CONST(x[1], x[5], w1, w1_q);
+	FWD2_CONST(x[2], x[6], w1, w1_q); FWD2_CONST(x[3], x[7], w1, w1_q);
+	const ZP w20_q = w2.s0 * pq.s1;
+	FWD2_CONST(x[0], x[2], w2.s0, w20_q); FWD2_CONST(x[1], x[3], w2.s0, w20_q);
+	const ZP w21_q = w2.s1 * pq.s1;
+	FWD2_CONST(x[4], x[6], w2.s1, w21_q); FWD2_CONST(x[5], x[7], w2.s1, w21_q);
+	FWD2(x[0], x[1], w4.s0); FWD2(x[2], x[3], w4.s1);
+	FWD2(x[4], x[5], w4.s2); FWD2(x[6], x[7], w4.s3);
 }
 
 INLINE void _backward8(const ZP2 pq, ZP x[8], const ZP w1_i, const ZP2 w2_i, const ZP4 w4_i)
 {
-	BCK2(x[0], x[1], w4_i.s0); BCK2(x[2], x[3], w4_i.s1); BCK2(x[4], x[5], w4_i.s2); BCK2(x[6], x[7], w4_i.s3);
-	BCK2(x[0], x[2], w2_i.s0); BCK2(x[1], x[3], w2_i.s0); BCK2(x[4], x[6], w2_i.s1); BCK2(x[5], x[7], w2_i.s1);
-	BCK2(x[0], x[4], w1_i); BCK2(x[1], x[5], w1_i); BCK2(x[2], x[6], w1_i); BCK2(x[3], x[7], w1_i);
+	BCK2(x[0], x[1], w4_i.s0); BCK2(x[2], x[3], w4_i.s1);
+	BCK2(x[4], x[5], w4_i.s2); BCK2(x[6], x[7], w4_i.s3);
+	const ZP w20_i_q = w2_i.s0 * pq.s1;
+	BCK2_CONST(x[0], x[2], w2_i.s0, w20_i_q); BCK2_CONST(x[1], x[3], w2_i.s0, w20_i_q);
+	const ZP w21_i_q = w2_i.s1 * pq.s1;
+	BCK2_CONST(x[4], x[6], w2_i.s1, w21_i_q); BCK2_CONST(x[5], x[7], w2_i.s1, w21_i_q);
+	const ZP w1_i_q = w1_i * pq.s1;
+	BCK2_CONST(x[0], x[4], w1_i, w1_i_q); BCK2_CONST(x[1], x[5], w1_i, w1_i_q);
+	BCK2_CONST(x[2], x[6], w1_i, w1_i_q); BCK2_CONST(x[3], x[7], w1_i, w1_i_q);
 }
 
 INLINE void _forward8_0(const ZP2 pq, ZP x[8], const ZP w1, const ZP2 w2, const ZP4 w4, const ZP rsq)
@@ -214,52 +239,74 @@ INLINE void _forward8_0(const ZP2 pq, ZP x[8], const ZP w1, const ZP2 w2, const 
 	_forward8(pq, x, w1, w2, w4);
 }
 
-INLINE void _square2x4(const ZP2 pq, ZP x[8], const ZP2 w2)
+INLINE void _square2x4(const ZP2 pq, ZP x[8], const ZP2 w2, const ZP2 w2_q)
 {
-	SQR2(x[0], x[1], w2.s0); SQR2N(x[2], x[3], w2.s0); SQR2(x[4], x[5], w2.s1); SQR2N(x[6], x[7], w2.s1);
+	SQR2(x[0], x[1], w2.s0, w2_q.s0); SQR2N(x[2], x[3], w2.s0, w2_q.s0);
+	SQR2(x[4], x[5], w2.s1, w2_q.s1); SQR2N(x[6], x[7], w2.s1, w2_q.s1);
 }
 
 INLINE void _square4x2(const ZP2 pq, ZP x[8], const ZP2 w2, const ZP2 w2_i)
 {
-	FWD2(x[0], x[2], w2.s0); FWD2(x[1], x[3], w2.s0); FWD2(x[4], x[6], w2.s1); FWD2(x[5], x[7], w2.s1);
-	_square2x4(pq, x, w2);
-	BCK2(x[0], x[2], w2_i.s0); BCK2(x[1], x[3], w2_i.s0); BCK2(x[4], x[6], w2_i.s1); BCK2(x[5], x[7], w2_i.s1);
+	const ZP2 w2_q = w2 * pq.s1;
+	FWD2_CONST(x[0], x[2], w2.s0, w2_q.s0); FWD2_CONST(x[1], x[3], w2.s0, w2_q.s0);
+	FWD2_CONST(x[4], x[6], w2.s1, w2_q.s1); FWD2_CONST(x[5], x[7], w2.s1, w2_q.s1);
+	_square2x4(pq, x, w2, w2_q);
+	const ZP2 w2_i_q = w2_i * pq.s1;
+	BCK2_CONST(x[0], x[2], w2_i.s0, w2_i_q.s0); BCK2_CONST(x[1], x[3], w2_i.s0, w2_i_q.s0);
+	BCK2_CONST(x[4], x[6], w2_i.s1, w2_i_q.s1); BCK2_CONST(x[5], x[7], w2_i.s1, w2_i_q.s1);
 }
 
 INLINE void _square8(const ZP2 pq, ZP x[8], const ZP w1, const ZP w1_i, const ZP2 w2, const ZP2 w2_i)
 {
-	FWD2(x[0], x[4], w1); FWD2(x[1], x[5], w1); FWD2(x[2], x[6], w1); FWD2(x[3], x[7], w1);
+	const ZP w1_q = w1 * pq.s1;
+	FWD2_CONST(x[0], x[4], w1, w1_q); FWD2_CONST(x[1], x[5], w1, w1_q);
+	FWD2_CONST(x[2], x[6], w1, w1_q); FWD2_CONST(x[3], x[7], w1, w1_q);
 	_square4x2(pq, x, w2, w2_i);
-	BCK2(x[0], x[4], w1_i); BCK2(x[1], x[5], w1_i); BCK2(x[2], x[6], w1_i); BCK2(x[3], x[7], w1_i);
+	const ZP w1_i_q = w1_i * pq.s1;
+	BCK2_CONST(x[0], x[4], w1_i, w1_i_q); BCK2_CONST(x[1], x[5], w1_i, w1_i_q);
+	BCK2_CONST(x[2], x[6], w1_i, w1_i_q); BCK2_CONST(x[3], x[7], w1_i, w1_i_q);
 }
 
-INLINE void _mul2x4(const ZP2 pq, ZP x[8], const ZP xp[8], const ZP2 w2)
+INLINE void _mul2x4(const ZP2 pq, ZP x[8], const ZP xp[8], const ZP2 w2, const ZP2 w2_q)
 {
-	MUL2(x[0], x[1], xp[0], xp[1], w2.s0); MUL2N(x[2], x[3], xp[2], xp[3], w2.s0); MUL2(x[4], x[5], xp[4], xp[5], w2.s1); MUL2N(x[6], x[7], xp[6], xp[7], w2.s1);
+	MUL2(x[0], x[1], xp[0], xp[1], w2.s0, w2_q.s0); MUL2N(x[2], x[3], xp[2], xp[3], w2.s0, w2_q.s0);
+	MUL2(x[4], x[5], xp[4], xp[5], w2.s1, w2_q.s1); MUL2N(x[6], x[7], xp[6], xp[7], w2.s1, w2_q.s1);
 }
 
 INLINE void _mul4x2(const ZP2 pq, ZP x[8], const ZP xp[8], const ZP2 w2, const ZP2 w2_i)
 {
-	FWD2(x[0], x[2], w2.s0); FWD2(x[1], x[3], w2.s0); FWD2(x[4], x[6], w2.s1); FWD2(x[5], x[7], w2.s1);
-	_mul2x4(pq, x, xp, w2);
-	BCK2(x[0], x[2], w2_i.s0); BCK2(x[1], x[3], w2_i.s0); BCK2(x[4], x[6], w2_i.s1); BCK2(x[5], x[7], w2_i.s1);
+	const ZP2 w2_q = w2 * pq.s1;
+	FWD2_CONST(x[0], x[2], w2.s0, w2_q.s0); FWD2_CONST(x[1], x[3], w2.s0, w2_q.s0);
+	FWD2_CONST(x[4], x[6], w2.s1, w2_q.s1); FWD2_CONST(x[5], x[7], w2.s1, w2_q.s1);
+	_mul2x4(pq, x, xp, w2, w2_q);
+	const ZP2 w2_i_q = w2_i * pq.s1;
+	BCK2_CONST(x[0], x[2], w2_i.s0, w2_i_q.s0); BCK2_CONST(x[1], x[3], w2_i.s0, w2_i_q.s0);
+	BCK2_CONST(x[4], x[6], w2_i.s1, w2_i_q.s1); BCK2_CONST(x[5], x[7], w2_i.s1, w2_i_q.s1);
 }
 
 INLINE void _mul8(const ZP2 pq, ZP x[8], const ZP xp[8], const ZP w1, const ZP w1_i, const ZP2 w2, const ZP2 w2_i)
 {
-	FWD2(x[0], x[4], w1); FWD2(x[1], x[5], w1); FWD2(x[2], x[6], w1); FWD2(x[3], x[7], w1);
+	const ZP w1_q = w1 * pq.s1;
+	FWD2_CONST(x[0], x[4], w1, w1_q); FWD2_CONST(x[1], x[5], w1, w1_q);
+	FWD2_CONST(x[2], x[6], w1, w1_q); FWD2_CONST(x[3], x[7], w1, w1_q);
 	_mul4x2(pq, x, xp, w2, w2_i);
-	BCK2(x[0], x[4], w1_i); BCK2(x[1], x[5], w1_i); BCK2(x[2], x[6], w1_i); BCK2(x[3], x[7], w1_i);
+	const ZP w1_i_q = w1_i * pq.s1;
+	BCK2_CONST(x[0], x[4], w1_i, w1_i_q); BCK2_CONST(x[1], x[5], w1_i, w1_i_q);
+	BCK2_CONST(x[2], x[6], w1_i, w1_i_q); BCK2_CONST(x[3], x[7], w1_i, w1_i_q);
 }
 
 INLINE void _fwd4x2(const ZP2 pq, ZP x[8], const ZP2 w2)
 {
-	FWD2(x[0], x[2], w2.s0); FWD2(x[1], x[3], w2.s0); FWD2(x[4], x[6], w2.s1); FWD2(x[5], x[7], w2.s1);
+	const ZP2 w2_q = w2 * pq.s1;
+	FWD2_CONST(x[0], x[2], w2.s0, w2_q.s0); FWD2_CONST(x[1], x[3], w2.s0, w2_q.s0);
+	FWD2_CONST(x[4], x[6], w2.s1, w2_q.s1); FWD2_CONST(x[5], x[7], w2.s1, w2_q.s1);
 }
 
 INLINE void _fwd8(const ZP2 pq, ZP x[8], const ZP w1, const ZP2 w2)
 {
-	FWD2(x[0], x[4], w1); FWD2(x[2], x[6], w1); FWD2(x[1], x[5], w1); FWD2(x[3], x[7], w1);
+	const ZP w1_q = w1 * pq.s1;
+	FWD2_CONST(x[0], x[4], w1, w1_q); FWD2_CONST(x[1], x[5], w1, w1_q);
+	FWD2_CONST(x[2], x[6], w1, w1_q); FWD2_CONST(x[3], x[7], w1, w1_q);
 	_fwd4x2(pq, x, w2);
 }
 
@@ -394,7 +441,7 @@ INLINE void square2x4g(const ZP2 pq, __global ZP * restrict const x,
 {
 	DECLARE_W2();
 	LOADG(1);
-	_square2x4(pq, xl, w2);
+	_square2x4(pq, xl, w2, w2 * pq.s1);
 	STOREG(1);
 }
 
@@ -403,7 +450,7 @@ INLINE void square2x4l(const ZP2 pq, __local ZP * restrict const X,
 {
 	DECLARE_W2();
 	LOADL(1);
-	_square2x4(pq, xl, w2);
+	_square2x4(pq, xl, w2, w2 * pq.s1);
 	STOREL(1);
 }
 
@@ -449,7 +496,7 @@ INLINE void mul2x4g(const ZP2 pq, __global ZP * restrict const x, __global const
 	DECLARE_W2();
 	LOADG(1);
 	LOADPG(1);
-	_mul2x4(pq, xl, xpl, w2);
+	_mul2x4(pq, xl, xpl, w2, w2 * pq.s1);
 	STOREG(1);
 }
 
@@ -459,7 +506,7 @@ INLINE void mul2x4l(const ZP2 pq, __local ZP * restrict const X, __global const 
 	DECLARE_W2();
 	LOADL(1);
 	LOADPG(1);
-	_mul2x4(pq, xl, xpl, w2);
+	_mul2x4(pq, xl, xpl, w2, w2 * pq.s1);
 	STOREL(1);
 }
 
