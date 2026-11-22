@@ -18,207 +18,219 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #define finline	__attribute__((always_inline))
 
-inline uint_32 mul_hi(const uint_32 x, const uint_32 y) { return uint_32((x * uint_64(y)) >> 32); }
+static constexpr uint_32 mul_hi(const uint_32 x, const uint_32 y) { return uint_32((x * uint_64(y)) >> 32); }
+
+// p * q = 1 (mod 2^32) (Newton's method)
+static constexpr uint_32 _invert(const uint_32 p)
+{
+	uint_32 q = 1, prev = 0;
+	while (q != prev) { prev = q; q *= 2 - p * q; }
+	return q;
+}
+
+// 2^32 mod p = Montgomery form of 1
+static constexpr uint_32 _one(const uint_32 p) { return (uint_32)(((uint_64)(1) << 32) % p); }
+
+// (2^32)^2 mod p
+static constexpr uint_32 _rsq(const uint_32 one, const uint_32 p) { return (uint_32)((one * (uint_64)(one)) % p); }
+
+static constexpr size_t _bitrev(const size_t i, const size_t n)
+{
+	size_t r = 0;
+	for (size_t k = n, j = i; k > 1; k /= 2, j /= 2) r = (2 * r) | (j % 2);
+	return r;
+}
 
 // The prime finite field Z/PZ
-template<uint_32 _P, uint_32 _PRIM_ROOT>
-class ZPT : public ZP
+class Mod
 {
-private:
-	// p * q = 1 (mod 2^32) (Newton's method)
-	finline static constexpr uint_32 _invert(const uint_32 p)
-	{
-		uint_32 q = 1, prev = 0;
-		while (q != prev) { prev = q; q *= 2 - p * q; }
-		return q;
-	}
-
-	static const uint_32 _Q = _invert(_P);
-
-	finline static uint_32 _add(const uint_32 lhs, const uint_32 rhs) { return lhs + rhs - ((lhs >= _P - rhs) ? _P : 0); }
-	finline static uint_32 _sub(const uint_32 lhs, const uint_32 rhs) { return lhs - rhs + ((lhs < rhs) ? _P : 0); }
+public:
+	finline static uint_32 _add(const uint_32 lhs, const uint_32 rhs, const uint_32 p) { return lhs + rhs - ((lhs >= p - rhs) ? p : 0); }
+	finline static uint_32 _sub(const uint_32 lhs, const uint_32 rhs, const uint_32 p) { return lhs - rhs + ((lhs < rhs) ? p : 0); }
 
 	// Montgomery multiplication by a constant: 1 mul + 2 mul_hi
-	finline static uint_32 _mul_const(const uint_32 lhs, const uint_32 rhs, const uint_32 rhs_Q)
+	finline static uint_32 _mul_const(const uint_32 lhs, const uint_32 rhs, const uint_32 rhs_Q, const uint_32 p)
 	{
-		const uint_32 mp = mul_hi(lhs * rhs_Q, _P);
-		return _sub(mul_hi(lhs, rhs), mp);
+		const uint_32 mp = mul_hi(lhs * rhs_Q, p);
+		return _sub(mul_hi(lhs, rhs), mp, p);
 	}
 
 	// Montgomery multiplication: 2 mul + 2 mul_hi
-	finline static uint_32 _mul(const uint_32 lhs, const uint_32 rhs) { return _mul_const(lhs, rhs,  rhs * _Q); }
+	finline static uint_32 _mul(const uint_32 lhs, const uint_32 rhs, const uint_32 p, const uint_32 q) { return _mul_const(lhs, rhs, rhs * q, p); }
 
-	// 2^32 mod p = Montgomery form of 1
-	static const uint_32 _one = (uint_32)(((uint_64)(1) << 32) % _P);
-	// (2^32)^2 mod p
-	static const uint_32 _rsq = (uint_32)((_one * (uint_64)(_one)) % _P);
-
-	ZPT pow(const uint_32 e) const
+	static ZP _pow(const ZP & lhs, const uint_32 e, const size_t k)
 	{
-		if (e == 0) return one();
-		ZPT r = one(), y = *this;
+		if (e == 0) return ZP(one[k]);
+		const uint_32 p = P[k], q = Q[k];
+		uint_32 r = one[k], y = lhs;
 		for (uint_32 i = e; i > 1; i /= 2)
 		{
-			if (i % 2 != 0) r *= y;
-			y *= y;
+			if (i % 2 != 0) r = _mul(r, y, p, q);
+			y = _mul(y, y, p, q);
 		}
-		r *= y;
-		return r;
+		r = _mul(r, y, p, q);
+		return ZP(r);
 	}
 
-	static ZPT primroot_n(const int ln) { return ZPT(_PRIM_ROOT).toMonty().pow((_P - 1) >> ln); }
-
-	static constexpr size_t bitrev(const size_t i, const size_t n)
-	{
-		size_t r = 0;
-		for (size_t k = n, j = i; k > 1; k /= 2, j /= 2) r = (2 * r) | (j % 2);
-		return r;
-	}
+	static ZP _primroot_n(const int ln, const size_t k) { return ZP(_pow(Mod::toMonty(primroot[k], k), (P[k] - 1) >> ln, k)); }
 
 public:
-	ZPT() {}
-	explicit ZPT(const ZP & n) : ZP(n) {}
-	explicit ZPT(const uint_32 n) : ZP(n) {}
+	static const size_t PSIZE = 4;
+	static constexpr uint_32 P[PSIZE] = { (125u << 25) + 1, (243u << 24) + 1, (235u << 24) + 1, (29u << 27) + 1 };
+	static constexpr uint_32 Q[PSIZE] = { _invert(P[0]), _invert(P[1]), _invert(P[2]), _invert(P[3]) };
+	static constexpr uint_32 primroot[PSIZE] = { 3, 7, 3, 3 };
+	static constexpr uint_32 one[PSIZE] = { _one(P[0]), _one(P[1]), _one(P[2]), _one(P[3]) };
+	static constexpr uint_32 rsq[PSIZE] = { _rsq(one[0], P[0]), _rsq(one[1], P[1]), _rsq(one[2], P[2]), _rsq(one[3], P[3]) };
 
-	static uint_32 P() { return _P; }
-	static uint_32 Q() { return _Q; }
+	static int_32 get_i32(const ZP & lhs, const size_t k) { return int_32(lhs - ((lhs >= P[k] / 2) ? P[k] : 0)); }
 
-	static ZPT one() { return ZPT(_one); }
-	static ZPT rsq() { return ZPT(_rsq); }
+	static ZP add(const ZP & lhs, const ZP & rhs, const size_t k) { return ZP(_add(lhs, rhs, P[k])); }
+	static ZP sub(const ZP & lhs, const ZP & rhs, const size_t k) { return ZP(_sub(lhs, rhs, P[k])); }
+	static ZP mul(const ZP & lhs, const ZP & rhs, const size_t k) { return ZP(_mul(lhs, rhs, P[k], Q[k])); }
 
-	int_32 get_i32() const { return int_32(_n - ((_n >= _P / 2) ? _P : 0)); }
-
-	ZPT & operator+=(const ZPT & rhs) { _n = _add(_n, rhs._n); return *this; }
-	ZPT & operator-=(const ZPT & rhs) { _n = _sub(_n, rhs._n); return *this; }
-	ZPT & operator*=(const ZPT & rhs) { _n = _mul(_n, rhs._n); return *this; }
-
-	ZPT operator+(const ZPT & rhs) const { return ZPT(_add(_n, rhs._n)); }
-	ZPT operator-(const ZPT & rhs) const { return ZPT(_sub(_n, rhs._n)); }
-	ZPT operator*(const ZPT & rhs) const { return ZPT(_mul(_n, rhs._n)); }
-
-	static ZPT norm(const int ln) { return ZPT(_P - ((_P - 1) >> ln)); }
+	static ZP submul(const ZP & lhs, const ZP & rhs, const ZP & m, const size_t k) { return ZP(mul(sub(lhs, rhs, k), m, k)); }
 
 	// Conversion into / out of Montgomery form
-	ZPT toMonty() const { return ZPT(_mul(_n, _rsq)); }
-	// ZPT fromMonty() const { return ZPT(_mul(_n, 1)); }
+	static ZP toMonty(const ZP & lhs, const size_t k) { return ZP(mul(lhs, rsq[k], k)); }
+	// static ZP fromMonty(const ZP & lhs, const size_t k) { return ZP(mul(lhs, 1, k)); }
 
-	ZPT invert() const { return pow(_P - 2); }
+	static ZP invert(const ZP & lhs, const size_t k) { return _pow(lhs, P[k] - 2, k); }
+	static ZP norm(const int ln, const size_t k) { return ZP(P[k] - ((P[k] - 1) >> ln)); }
 
 	// modulo x^n - 1
-	static void set_roots_R(ZP * const w_R, ZP * const wi_R, const int ln)
+	static void set_roots_R(ZP * const w_R, ZP * const wi_R, const int ln, const size_t k)
 	{
 		const size_t n = size_t(1) << ln;
 
-		ZPT sr_s = primroot_n(ln - 1), sr_si = sr_s.invert();	// (-1)^{1/s}
+		ZP sr_s = _primroot_n(ln - 1, k), sr_si = invert(sr_s, k);	// (-1)^{1/s}
 		for (size_t s = n / 4; s >= 1; s /= 2)
 		{
-			ZPT t_j = one(), ti_j = one();
+			ZP t_j = one[k], ti_j = one[k];
 			for (size_t j = 0; j < s; ++j)
 			{
-				const size_t jr = bitrev(j, s);
+				const size_t jr = _bitrev(j, s);
 				w_R[s + jr] = t_j; wi_R[s + jr] = ti_j;
-				t_j *= sr_s; ti_j *= sr_si;
+				t_j = mul(t_j, sr_s, k); ti_j = mul(ti_j, sr_si, k);
 			}
 
-			sr_s *= sr_s; sr_si *= sr_si;
+			sr_s = mul(sr_s, sr_s, k); sr_si = mul(sr_si, sr_si, k);
 		}
 
-		w_R[0] = ZPT(w_R[1]).toMonty();
+		w_R[0] = Mod::toMonty(w_R[1], k);
 	}
 
 	// modulo x^n + 1
-	static void set_roots_Q(ZP * const w_Q, ZP * const wi_Q, const int ln)
+	static void set_roots_Q(ZP * const w_Q, ZP * const wi_Q, const int ln, const size_t k)
 	{
 		const size_t n = size_t(1) << ln;
 
-		ZPT sr_2s = primroot_n(ln), sr_2si = sr_2s.invert();	// (-1)^{1/2s}
+		ZP sr_2s = _primroot_n(ln, k), sr_2si = invert(sr_2s, k);	// (-1)^{1/2s}
 		for (size_t s = n / 4; s >= 1; s /= 2)
 		{
-			const ZPT sr_s = sr_2s * sr_2s, sr_si = sr_2si * sr_2si;	// (-1)^{1/s}
+			const ZP sr_s = mul(sr_2s, sr_2s, k), sr_si = mul(sr_2si, sr_2si, k);	// (-1)^{1/s}
 
-			ZPT t_j = sr_2s, ti_j = sr_2si;
+			ZP t_j = sr_2s, ti_j = sr_2si;
 			for (size_t j = 0; j < s; ++j)
 			{
-				const size_t jr = bitrev(j, s);
+				const size_t jr = _bitrev(j, s);
 				w_Q[s + jr] = t_j; wi_Q[s + jr] = ti_j;
-				t_j *= sr_s; ti_j *= sr_si;
+				t_j = mul(t_j, sr_s, k); ti_j = mul(ti_j, sr_si, k);
 			}
 
 			sr_2s = sr_s; sr_2si = sr_si;
 		}
 
-		w_Q[0] = ZPT(w_Q[1]).toMonty();
+		w_Q[0] = Mod::toMonty(w_Q[1], k);
 	}
 };
 
-using ZP1 = ZPT<(125u << 25) + 1, 3>;
-using ZP2 = ZPT<(243u << 24) + 1, 7>;
-using ZP3 = ZPT<(235u << 24) + 1, 3>;
-using ZP4 = ZPT<( 29u << 27) + 1, 3>;
-
-class RNS2
+template<size_t SIZE>
+class RNS
 {
-private:
-	ZP1 _r1;
-	ZP2 _r2;
+protected:
+	ZP _r[SIZE];
+
+	RNS & _add(const RNS & rhs) { for (size_t k = 0; k < SIZE; ++k) _r[k] = Mod::add(_r[k], rhs._r[k], k); return *this; }
+	RNS & _sub(const RNS & rhs) { for (size_t k = 0; k < SIZE; ++k) _r[k] = Mod::sub(_r[k], rhs._r[k], k); return *this; }
+	RNS & _mul(const RNS & rhs) { for (size_t k = 0; k < SIZE; ++k) _r[k] = Mod::mul(_r[k], rhs._r[k], k); return *this; }
+
+	RNS & _toMonty() { for (size_t k = 0; k < SIZE; ++k) _r[k] = Mod::toMonty(_r[k], k); return *this; }
+	RNS & _norm(const int ln) { for (size_t k = 0; k < SIZE; ++k) _r[k] = Mod::norm(ln, k); return *this; }
+
+public:
+	RNS() {}
+	explicit RNS(const uint_32 n) { for (size_t k = 0; k < SIZE; ++k) _r[k] = ZP(n); }
+	explicit RNS(const uint_32 * const n) { for (size_t k = 0; k < SIZE; ++k) _r[k] = ZP(n[k]); }
+
+	const ZP & get_r(const size_t k) const { return _r[k]; }
+
+};
+
+class RNS1 : public RNS<1>
+{
+public:
+	typedef int_32 big_type;
 
 private:
 	// Chinese remainder theorem
-	static int_64 garner2(const ZP1 & r1, const ZP2 & r2)
+	finline int_32 garner1() const { return Mod::get_i32(_r[0], 0); }
+
+public:
+	RNS1() {}
+	explicit RNS1(const uint_32 n) : RNS(n) {}
+	explicit RNS1(const uint_32 * const n) : RNS(n) {}
+
+	big_type get_i32() const { return big_type(garner1()); }
+};
+
+class RNS2 : public RNS<2>
+{
+public:
+	typedef int_64 big_type;
+
+private:
+	// Chinese remainder theorem
+	finline int_64 garner2() const
 	{
-		static const uint_32 P1 = ZP1::P(), P2 = ZP2::P();
-		static const ZP1 INVP2_P1 = ZP1(P2).toMonty().invert();	// P2 < P1
+		static const uint_32 P0 = Mod::P[0], P1 = Mod::P[1];
+		static const ZP INVP1_P0 = Mod::invert(Mod::toMonty(P1, 0), 0);	// P2 < P1
 
 		// convert to mixed-radix representation
-		const uint_32 u2 = r2.get();
-		const uint_32 u1 = ((r1 - ZP1(u2)) * INVP2_P1).get();
-		const int_32 i1 = (u1 > P1 / 2) ? (int_32)(u1 - P1) : (int_32)(u1);
+		const uint_32 u1 = _r[1];
+		const uint_32 u0 = Mod::submul(_r[0], u1, INVP1_P0, 0);
+		const int_32 i0 = (u0 > P0 / 2) ? (int_32)(u0 - P0) : (int_32)(u0);
 
-		return (int_64)(u2) + (int_64)(P2) * i1;
+		return (int_64)(u1) + (int_64)(P1) * i0;
 	}
 
 public:
 	RNS2() {}
-	explicit RNS2(const uint_32 n1, const uint_32 n2) : _r1(n1), _r2(n2) {}
+	explicit RNS2(const uint_32 n) : RNS(n) {}
+	explicit RNS2(const uint_32 * const n) : RNS(n) {}
 
-	int_64 get_i64() const { return garner2(_r1, _r2); }
+	big_type get_i64() const { return garner2(); }
 };
 
-class RNS4
+class RNS4 : public RNS<4>
 {
-private:
-	ZP1 _r1;
-	ZP2 _r2;
-	ZP3 _r3;
-	ZP4 _r4;
-
-private:
-	explicit RNS4(const ZP1 & r1, const ZP2 & r2, const ZP3 & r3, const ZP4 & r4) : _r1(r1), _r2(r2), _r3(r3), _r4(r4) {}
+public:
+	// typedef int_128 big_type;
 
 public:
 	RNS4() {}
-	explicit RNS4(const uint_32 n) : _r1(n), _r2(n), _r3(n), _r4(n) {}
+	explicit RNS4(const uint_32 n) : RNS(n) {}
+	explicit RNS4(const uint_32 * const n) : RNS(n) {}
 
-	ZP get_r(const size_t i) const
-	{
-		if      (i == 0) return _r1;
-		else if (i == 1) return _r2;
-		else if (i == 2) return _r3;
-		else             return _r4;
-	}
-
-	RNS4 & operator+=(const RNS4 & rhs) { _r1 += rhs._r1; _r2 += rhs._r2; _r3 += rhs._r3; _r4 += rhs._r4; return *this; }
-	RNS4 & operator-=(const RNS4 & rhs) { _r1 -= rhs._r1; _r2 -= rhs._r2; _r3 -= rhs._r3; _r4 -= rhs._r4; return *this; }
-	RNS4 & operator*=(const RNS4 & rhs) { _r1 *= rhs._r1; _r2 *= rhs._r2; _r3 *= rhs._r3; _r4 *= rhs._r4; return *this; }
+	RNS4 & operator+=(const RNS4 & rhs) { _add(rhs); return *this; }
+	RNS4 & operator-=(const RNS4 & rhs) { _sub(rhs); return *this; }
+	RNS4 & operator*=(const RNS4 & rhs) { _mul(rhs); return *this; }
 
 	RNS4 operator+(const RNS4 & rhs) const { RNS4 r = *this; r += rhs; return r; }
 	RNS4 operator-(const RNS4 & rhs) const { RNS4 r = *this; r -= rhs; return r; }
 	RNS4 operator*(const RNS4 & rhs) const { RNS4 r = *this; r *= rhs; return r; }
 
-	// Conversion into Montgomery form
-	RNS4 toMonty() const { return RNS4(_r1.toMonty(), _r2.toMonty(), _r3.toMonty(), _r4.toMonty()); }
-
-	static RNS4 norm(const int ln) { return RNS4(ZP1::norm(ln), ZP2::norm(ln), ZP3::norm(ln), ZP4::norm(ln)); }
+	RNS4 toMonty() const { RNS4 r = *this; r._toMonty(); return r; }
+	static RNS4 norm(const int ln) { RNS4 r; r._norm(ln); return r; }
 };
 
 template<int LN>
@@ -263,37 +275,53 @@ private:
 		const size_t n = size_t(1) << LN;
 		const int lbase = _lbase;
 		const uint_32 base = 1u << lbase;
+		const size_t  prm_count = _prm_count;
 		ZP * const buf = _buf;
 
 		const size_t x_size = mpz_size(x);
 		const mp_limb_t * const x_ptr = mpz_limbs_read(x);
 
-		if (_prm_count == 2)
+		if (_pck_factor == 1)
 		{
 			size_t bit_index = 0;
 			for (size_t i = 0; i < n; ++i)
 			{
-				const uint_32 r = read_word(x_ptr, x_size, bit_index) & (base - 1);
+				buf[0 * n + i] = read_word(x_ptr, x_size, bit_index) & (base - 1);
 				bit_index += size_t(lbase);
-				for (size_t l = 0; l < 2; ++l) buf[l * n + i] = ZP(r);
 			}
 		}
-		else if (_prm_count == 4)
+		else if (_pck_factor == 2)
 		{
-			const RNS4 rbase = RNS4(1u << lbase).toMonty();
 			size_t bit_index = 0;
 			for (size_t i = 0; i < n; ++i)
 			{
-				const uint_32 r1 = read_word(x_ptr, x_size, bit_index) & (base - 1);
+				buf[0 * n + i] = read_word(x_ptr, x_size, bit_index) & (base - 1);
 				bit_index += size_t(lbase);
-				const uint_32 r2 = read_word(x_ptr, x_size, bit_index) & (base - 1);
+				buf[1 * n + i] = read_word(x_ptr, x_size, bit_index) & (base - 1);
 				bit_index += size_t(lbase);
-				const RNS4 r = RNS4(r1) + RNS4(r2) * rbase;
-				for (size_t l = 0; l < 4; ++l) buf[l * n + i] = r.get_r(l);
 			}
+		}
+		else {}	// TODO
+
+		for (size_t i = 0; i < n; ++i)
+		{
+			if (prm_count == 2)
+			{
+				RNS2 r = RNS2(buf[0 * n + i]);
+				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
+			}
+			else if (prm_count == 4)
+			{
+				const RNS4 rbase = RNS4(1u << lbase).toMonty();
+
+				RNS4 r = RNS4(buf[1 * n + i]);
+				r = r * rbase + RNS4(buf[0 * n + i]);	// TODO move to RNS4 (encode)
+				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
+			}
+			else {}	// TODO
 		}
 
-		for (size_t l = 0; l < _prm_count; ++l) _engine.write_memory(l * Reg_count + reg_y, &buf[l * n]);
+		for (size_t k = 0; k < prm_count; ++k) _engine.write_memory(k * Reg_count + reg_y, &buf[k * n]);
 	}
 
 	void get_mpz(mpz_t & y, const size_t reg_x)
@@ -304,33 +332,37 @@ private:
 		ZP * const buf = _buf;
 
 		_engine.read_memory(0 * Reg_count + reg_x, &buf[0 * n]);
-		if (_prm_count > 2) _engine.read_memory(1 * Reg_count + reg_x, &buf[1 * n]);
+		if (_pck_factor > 1) _engine.read_memory(1 * Reg_count + reg_x, &buf[1 * n]);
 
 		const size_t y_size = (size_t(lbase_pck) << LN) / 64 + 2;
 		mp_limb_t * const y_ptr = mpz_limbs_write(y, mp_size_t(y_size));
 		for (size_t i = 0; i < y_size; ++i) y_ptr[i] = 0;
 
-		int_64 f = 0;
-		if (_prm_count == 2)
+		long fr = 0;
+		if (_pck_factor == 1)
 		{
+			int_64 f = 0;	// TODO int_32
 			size_t bit_index = 0;
 			for (size_t i = 0; i < n; ++i)
 			{
-				f += ZP1(buf[i]).get_i32();
+				f += RNS1(buf[i]).get_i32();
 				const uint_32 r = uint_32(f) & (base - 1);
 				f >>= lbase;
 
 				write_word(y_ptr, bit_index, r);
 				bit_index += size_t(lbase);
 			}
+			fr = long(f);
 		}
-		else
+		else if (_pck_factor == 2)
 		{
+			int_64 f = 0;
 			size_t bit_index = 0;
 			for (size_t i = 0; i < n; ++i)
 			{
-				f += RNS2(buf[0 * n + i].get(), buf[1 * n + i].get()).get_i64();
-				const uint_32 r1 = (uint_32)(f) & (base - 1);
+				uint_32 u[_pck_factor]; for (size_t l = 0; l < _pck_factor; ++l) u[l] = buf[l * n + i];
+				f += RNS2(u).get_i64();
+				const uint_32 r1 = (uint_32)(f) & (base - 1);	// TODO 64-bit extract_r
 				f >>= lbase;
 				const uint_32 r2 = (uint_32)(f) & (base - 1);
 				f >>= lbase;
@@ -340,15 +372,17 @@ private:
 				write_word(y_ptr, bit_index, r2);
 				bit_index += size_t(lbase);
 			}
+			fr = long(f);
 		}
+		else {}	// TODO
 
 		mp_size_t s = mp_size_t(y_size);
 		while ((s > 0) && (y_ptr[s - 1] == 0)) --s;
  		mpz_limbs_finish(y, s);
 
-		if (f != 0)
+		if (fr != 0)
 		{
-			mpz_t t; mpz_init_set_si(t, long(f));
+			mpz_t t; mpz_init_set_si(t, fr);
 			mpz_mul_2exp(t, t, mp_bitcnt_t(lbase_pck) << LN);
 			mpz_add(y, y, t);
 			mpz_clear(t);
@@ -526,10 +560,10 @@ public:
 		uint32_t n32; if (!cfile.read(reinterpret_cast<char *>(&n32), sizeof(n32))) return false;
 		if (n32 != n) return false;
 
-		for (size_t i = 0; i < _prm_count; ++i)
+		for (size_t k = 0; k < _prm_count; ++k)
 		{
 			if (!cfile.read(reinterpret_cast<char *>(buf), 2 * n * sizeof(ZP))) return false;
-			_engine.write_memory(i * Reg_count + Reg0, buf, 2);
+			_engine.write_memory(k * Reg_count + Reg0, buf, 2);
 		}
 		return true;
 	}
@@ -544,9 +578,9 @@ public:
 		const uint32_t n32 = uint32_t(n);
 		if (!cfile.write(reinterpret_cast<const char *>(&n32), sizeof(n32))) return;
 
-		for (size_t i = 0; i < _prm_count; ++i)
+		for (size_t k = 0; k < _prm_count; ++k)
 		{
-			_engine.read_memory(i * Reg_count + Reg0, buf, 2);
+			_engine.read_memory(k * Reg_count + Reg0, buf, 2);
 			if (!cfile.write(reinterpret_cast<const char *>(buf), 2 * n * sizeof(ZP))) return;
 		}
 	}
@@ -579,48 +613,41 @@ public:
 		src << "#define PRM_COUNT\t" << prm_count << std::endl;
 		src << "#define PCK_FACTOR\t" << pck_factor << std::endl;
 
-		src << "#define P1\t" << ZP1::P() << "u" << std::endl;
-		src << "#define Q1\t" << ZP1::Q() << "u" << std::endl;
-		src << "#define RSQ1\t" << ZP1::rsq().get() << "u" << std::endl;
-		src << "#define P2\t" << ZP2::P() << "u" << std::endl;
-		src << "#define Q2\t" << ZP2::Q() << "u" << std::endl;
-		src << "#define RSQ2\t" << ZP2::rsq().get() << "u" << std::endl;
-		src << "#define P3\t" << ZP3::P() << "u" << std::endl;
-		src << "#define Q3\t" << ZP3::Q() << "u" << std::endl;
-		src << "#define RSQ3\t" << ZP3::rsq().get() << "u" << std::endl;
-		src << "#define P4\t" << ZP4::P() << "u" << std::endl;
-		src << "#define Q4\t" << ZP4::Q() << "u" << std::endl;
-		src << "#define RSQ4\t" << ZP4::rsq().get() << "u" << std::endl;
+		for (size_t k = 0; k < Mod::PSIZE; ++k)
+		{
+			src << "#define P" << k << "\t" << Mod::P[k] << "u" << std::endl;
+			src << "#define Q" << k << "\t" << Mod::Q[k] << "u" << std::endl;
+			src << "#define RSQ" << k << "\t" << Mod::rsq[k] << "u" << std::endl;
+		}
 
 		// Not converted into Montgomery form such that output is converted out of MF
 		const RNS4 norm = RNS4::norm(LN - 1);
-		src << "__constant uint g_norm[" << prm_count << "] = { " << norm.get_r(0).get() << "u";
-		for (size_t l = 1; l < prm_count; ++l) src << ", " << norm.get_r(l).get() << "u";
+		src << "__constant uint g_norm[" << prm_count << "] = { " << norm.get_r(0) << "u";
+		for (size_t l = 1; l < prm_count; ++l) src << ", " << norm.get_r(l) << "u";
 		src << " };" << std::endl;
 
 		const RNS4 rbase = RNS4(1u << lbase).toMonty();
-		src << "__constant uint g_base[" << prm_count << "] = { " << rbase.get_r(0).get() << "u";
-		for (size_t l = 1; l < prm_count; ++l) src << ", " << rbase.get_r(l).get() << "u";
+		src << "__constant uint g_base[" << prm_count << "] = { " << rbase.get_r(0) << "u";
+		for (size_t l = 1; l < prm_count; ++l) src << ", " << rbase.get_r(l) << "u";
 		src << " };" << std::endl;
 
 		RNS4 rbase_S = RNS4(1u << lbase); for (size_t l = 1; l < pck_factor; ++l) rbase_S *= rbase;
-		src << "__constant uint g_baseS[" << prm_count << "] = { " << rbase_S.get_r(0).get() << "u";
-		for (size_t l = 1; l < prm_count; ++l) src << ", " << rbase_S.get_r(l).get() << "u";
+		src << "__constant uint g_baseS[" << prm_count << "] = { " << rbase_S.get_r(0) << "u";
+		for (size_t l = 1; l < prm_count; ++l) src << ", " << rbase_S.get_r(l) << "u";
 		src << " };" << std::endl;
 
-		src << "#define INVP2_P1\t" << ZP1(ZP2::P()).toMonty().invert().get() << "u" << std::endl;
+		src << "#define INVP1_P0\t" << Mod::invert(Mod::toMonty(Mod::P[1], 0), 0) << "u" << std::endl;
 
-		// TODO use RNS4 type
 		if (prm_count >= 3)
 		{
-			src << "#define INVP3_P1\t" << ZP1(ZP3::P()).toMonty().invert().get() << "u" << std::endl;
-			src << "#define INVP3_P2\t" << ZP2(ZP3::P()).toMonty().invert().get() << "u" << std::endl;
+			src << "#define INVP2_P0\t" << Mod::invert(Mod::toMonty(Mod::P[2], 0), 0) << "u" << std::endl;
+			src << "#define INVP2_P1\t" << Mod::invert(Mod::toMonty(Mod::P[2], 1), 1) << "u" << std::endl;
 		}
 		if (prm_count >= 4)
 		{
-			src << "#define INVP4_P1\t" << ZP1(ZP4::P()).toMonty().invert().get() << "u" << std::endl;
-			src << "#define INVP4_P2\t" << ZP2(ZP4::P()).toMonty().invert().get() << "u" << std::endl;
-			src << "#define INVP4_P3\t" << ZP3(ZP4::P()).toMonty().invert().get() << "u" << std::endl;
+			src << "#define INVP3_P0\t" << Mod::invert(Mod::toMonty(Mod::P[3], 0), 0) << "u" << std::endl;
+			src << "#define INVP3_P1\t" << Mod::invert(Mod::toMonty(Mod::P[3], 1), 1) << "u" << std::endl;
+			src << "#define INVP3_P2\t" << Mod::invert(Mod::toMonty(Mod::P[3], 2), 2) << "u" << std::endl;
 		}
 
 		src << "#define CARRY_LENGTH\t" << CARRY_LENGTH << "u"  << std::endl;
@@ -646,26 +673,11 @@ public:
 		_engine.alloc_memory(Reg_count);
 		_engine.create_kernels();
 
-		ZP1::set_roots_R(&_buf[0 * (n / 2)], &_buf[1 * (n / 2)], LN);
-		ZP1::set_roots_Q(&_buf[2 * (n / 2)], &_buf[3 * (n / 2)], LN);
-		_engine.write_memory(0 * Reg_count + Reg_w_R, _buf, 2);
-
-		ZP2::set_roots_R(&_buf[0 * (n / 2)], &_buf[1 * (n / 2)], LN);
-		ZP2::set_roots_Q(&_buf[2 * (n / 2)], &_buf[3 * (n / 2)], LN);
-		_engine.write_memory(1 * Reg_count + Reg_w_R, _buf, 2);
-
-		if (prm_count >= 3)
+		for (size_t k = 0; k < prm_count; ++k)
 		{
-			ZP3::set_roots_R(&_buf[0 * (n / 2)], &_buf[1 * (n / 2)], LN);
-			ZP3::set_roots_Q(&_buf[2 * (n / 2)], &_buf[3 * (n / 2)], LN);
-			_engine.write_memory(2 * Reg_count + Reg_w_R, _buf, 2);
-		}
-
-		if (prm_count >= 4)
-		{
-			ZP4::set_roots_R(&_buf[0 * (n / 2)], &_buf[1 * (n / 2)], LN);
-			ZP4::set_roots_Q(&_buf[2 * (n / 2)], &_buf[3 * (n / 2)], LN);
-			_engine.write_memory(3 * Reg_count + Reg_w_R, _buf, 2);
+			Mod::set_roots_R(&_buf[0 * (n / 2)], &_buf[1 * (n / 2)], LN, k);
+			Mod::set_roots_Q(&_buf[2 * (n / 2)], &_buf[3 * (n / 2)], LN, k);
+			_engine.write_memory(k * Reg_count + Reg_w_R, _buf, 2);
 		}
 
 		mpz_set(_Nz, N);
@@ -753,11 +765,11 @@ inline transform * create_transformGPU(const mpz_t & N, const int32_t a, const s
 	long e_n; const double m_n = mpz_get_d_2exp(&e_n, N);
 	const double log2_16aN = std::log2(16.0 * a) + std::log2(m_n) + e_n;
 
-	const double p_2a2 = ZP1::P() * double(ZP2::P()) / 2 / a;
+	const double p_2a2 = Mod::P[0] * double(Mod::P[1]) / 2 / a;
 	int ln2 = 0, lbase2 = 0; get_n_base(ln2, lbase2, 1, log2_16aN, p_2a2);
-	const double p_2a3 = p_2a2 * double(ZP3::P());
+	const double p_2a3 = p_2a2 * double(Mod::P[2]);
 	int ln3 = 0, lbase3 = 0; get_n_base(ln3, lbase3, 2, log2_16aN, p_2a3);
-	const double p_2a4 = p_2a3 * double(ZP4::P());
+	const double p_2a4 = p_2a3 * double(Mod::P[3]);
 	int ln4 = 0, lbase4 = 0; get_n_base(ln4, lbase4, 2, log2_16aN, p_2a4);
 
 	// const double c2 = 2 * double(1u << ln2) * ln2;
@@ -777,7 +789,7 @@ inline transform * create_transformGPU(const mpz_t & N, const int32_t a, const s
 #if defined(QUICK_TEST)
 	if (ln < 4) throw std::runtime_error("NTT size < 2^4 is not supported");
 #else
-	if (ln < 10) throw std::runtime_error("NTT size < 2^11 is not supported");
+	if (ln < 10) throw std::runtime_error("NTT size < 2^10 is not supported");
 #endif
 	if (ln > 23) throw std::runtime_error("NTT size > 2^23 is not supported");
 

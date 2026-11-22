@@ -33,27 +33,27 @@ static const char * const src_ocl_kernel = \
 "#define LBASE			28\n" \
 "#define PRM_COUNT		4\n" \
 "#define PCK_FACTOR		2\n" \
-"#define P1				4194304001u\n" \
-"#define Q1				100663297u\n" \
-"#define RSQ1			232465106u\n" \
-"#define P2				4076863489u\n" \
-"#define Q2				218103809u\n" \
-"#define RSQ2			3444438393u\n" \
-"#define P3				3942645761u\n" \
-"#define Q3				352321537u\n" \
-"#define RSQ3			3810498414u\n" \
-"#define P4				3892314113u\n" \
-"#define Q4				402653185u\n" \
-"#define RSQ4			1703176688u\n" \
+"#define P0				4194304001u\n" \
+"#define Q0				100663297u\n" \
+"#define RSQ0			232465106u\n" \
+"#define P1				4076863489u\n" \
+"#define Q1				218103809u\n" \
+"#define RSQ1			3444438393u\n" \
+"#define P2				3942645761u\n" \
+"#define Q2				352321537u\n" \
+"#define RSQ2			3810498414u\n" \
+"#define P3				3892314113u\n" \
+"#define Q3				402653185u\n" \
+"#define RSQ3			1703176688u\n" \
 "__constant uint g_norm[4] = { 3670016001u, 3567255553u, 3449815041u, 3405774849u };\n" \
 "__constant uint g_base[4] = { 3174786139u, 3997810352u, 1461973742u, 212897086u };\n" \
 "__constant uint g_baseS[4] = { 3018288268u, 499726294u, 1168408158u, 999690664u };\n" \
-"#define INVP2_P1		1797558821u\n" \
-"#define INVP3_P1		3075822917u\n" \
-"#define INVP3_P2		4076863457u\n" \
-"#define INVP4_P1		3262236431u\n" \
-"#define INVP4_P2		2223743698u\n" \
-"#define INVP4_P3		2628430422u\n" \
+"#define INVP1_P0		1797558821u\n" \
+"#define INVP2_P0		3075822917u\n" \
+"#define INVP2_P1		4076863457u\n" \
+"#define INVP3_P0		3262236431u\n" \
+"#define INVP3_P1		2223743698u\n" \
+"#define INVP3_P2		2628430422u\n" \
 "#define CARRY_LENGTH	4u\n" \
 "#define CARRY_WG_SZ		256u\n" \
 "#define Z_OFFSET		10240u\n" \
@@ -83,13 +83,13 @@ static const char * const src_ocl_kernel = \
 "typedef uint2_32	ZP2;\n" \
 "typedef uint4_32	ZP4;\n" \
 "\n" \
+"#define	PQ0		(ZP2)(P0, Q0)\n" \
 "#define	PQ1		(ZP2)(P1, Q1)\n" \
 "#define	PQ2		(ZP2)(P2, Q2)\n" \
 "#define	PQ3		(ZP2)(P3, Q3)\n" \
-"#define	PQ4		(ZP2)(P4, Q4)\n" \
 "\n" \
-"__constant ZP2 g_pq[4] = { PQ1, PQ2, PQ3, PQ4 };\n" \
-"__constant ZP g_rsq[4] = { RSQ1, RSQ2, RSQ3, RSQ4 };\n" \
+"__constant ZP2 g_pq[4] = { PQ0, PQ1, PQ2, PQ3 };\n" \
+"__constant ZP g_rsq[4] = { RSQ0, RSQ1, RSQ2, RSQ3 };\n" \
 "\n" \
 "INLINE ZP addmod(const ZP lhs, const ZP rhs, const ZP p)\n" \
 "{\n" \
@@ -1102,13 +1102,13 @@ static const char * const src_ocl_kernel = \
 "#define NULL_PTR	((__global const ZP *)0)\n" \
 "\n" \
 "// Chinese remainder theorem\n" \
-"INLINE int_64 garner2(const ZP r1, const ZP r2)\n" \
+"INLINE int_64 garner2(const ZP r0, const ZP r1)\n" \
 "{\n" \
-"	const uint_32 u2 = r2;\n" \
-"	const uint_32 u1 = submulmod(r1, u2, INVP2_P1, PQ1);	// P2 < P1\n" \
-"	const int_32 i1 = (u1 > P1 / 2) ? (int_32)(u1 - P1) : (int_32)(u1);\n" \
+"	const uint_32 u1 = r1;\n" \
+"	const uint_32 u0 = submulmod(r0, u1, INVP1_P0, PQ0);	// P2 < P1\n" \
+"	const int_32 i0 = (u0 > P0 / 2) ? (int_32)(u0 - P0) : (int_32)(u0);\n" \
 "\n" \
-"	return (int_64)(u2) + (int_64)(P2) * i1;\n" \
+"	return (int_64)(u1) + (int_64)(P1) * i0;\n" \
 "}\n" \
 "\n" \
 "#if (PRM_COUNT == 4)\n" \
@@ -1193,18 +1193,18 @@ static const char * const src_ocl_kernel = \
 "	return r;\n" \
 "}\n" \
 "\n" \
-"INLINE int_128 garner4(const ZP r1, const ZP r2, const ZP r3, const ZP r4)\n" \
+"INLINE int_128 garner4(const ZP r0, const ZP r1, const ZP r2, const ZP r3)\n" \
 "{\n" \
-"	// convert to mixed-radix representation, we must have P4 < P3 < P2 < P1\n" \
-"	const uint_32 u4 = r4;\n" \
-"	const uint_32 u3 = submulmod(r3, u4, INVP4_P3, PQ3);\n" \
-"	const uint_32 u2 = submulmod(submulmod(r2, u4, INVP4_P2, PQ2), u3, INVP3_P2, PQ2);\n" \
-"	const uint_32 u1 = submulmod(submulmod(submulmod(r1, u4, INVP4_P1, PQ1), u3, INVP3_P1, PQ1), u2, INVP2_P1, PQ1);\n" \
-"	const int_32 i1 = (u1 > P1 / 2) ? (int_32)(u1 - P1) : (int_32)(u1);\n" \
+"	// convert to mixed-radix representation, we must have P3 < P2 < P1 < P0\n" \
+"	const uint_32 u3 = r3;\n" \
+"	const uint_32 u2 = submulmod(r2, u3, INVP3_P2, PQ2);\n" \
+"	const uint_32 u1 = submulmod(submulmod(r1, u3, INVP3_P1, PQ1), u2, INVP2_P1, PQ1);\n" \
+"	const uint_32 u0 = submulmod(submulmod(submulmod(r0, u3, INVP3_P0, PQ0), u2, INVP2_P0, PQ0), u1, INVP1_P0, PQ0);\n" \
+"	const int_32 i0 = (u0 > P0 / 2) ? (int_32)(u0 - P0) : (int_32)(u0);\n" \
 "\n" \
-"	const uint_64 u34 = u4 + (uint_64)(P4) * u3;\n" \
-"	const int_64 i12 = (int_64)(u2) + (int_64)(P2) * i1;\n" \
-"	return int128_add_u64(int128_mul_u64i64(P3 * (uint_64)(P4), i12), u34);\n" \
+"	const uint_64 u23 = u3 + (uint_64)(P3) * u2;\n" \
+"	const int_64 i01 = (int_64)(u1) + (int_64)(P1) * i0;\n" \
+"	return int128_add_u64(int128_mul_u64i64(P2 * (uint_64)(P3), i01), u23);\n" \
 "}\n" \
 "\n" \
 "#endif\n" \
@@ -1217,7 +1217,7 @@ static const char * const src_ocl_kernel = \
 "typedef int_32		small_type;	// size = PCK_FACTOR * 32 bits > PCK_FACTOR * LBASE\n" \
 "\n" \
 "INLINE big_type getK_i(const RNS_K r) { return garner2(r.r[0], r.r[1]); }\n" \
-"INLINE small_type getS_i(const RNS_S r) { return get_i32(r.r[0], P1); }\n" \
+"INLINE small_type getS_i(const RNS_S r) { return get_i32(r.r[0], P0); }\n" \
 "\n" \
 "INLINE pck_type extract_r(big_type * const f)\n" \
 "{\n" \
@@ -1238,7 +1238,7 @@ static const char * const src_ocl_kernel = \
 "	{\n" \
 "		// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF\n" \
 "		f += getK_i(mulmodK(y[j], NORM_K())) * a;\n" \
-"		if (yi != NULL_PTR) f -= get_i32(yi[j], P1);\n" \
+"		if (yi != NULL_PTR) f -= get_i32(yi[j], P0);\n" \
 "		r[j] = extract_r(&f);\n" \
 "	}\n" \
 "\n" \
@@ -1276,7 +1276,7 @@ static const char * const src_ocl_kernel = \
 "	if ((id == 0) && (is_nega != 0)) f = -f;\n" \
 "	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
 "	{\n" \
-"		f += get_i32(y[j], P1);\n" \
+"		f += get_i32(y[j], P0);\n" \
 "		int_32 ri = (int_32)extract_r(&f);\n" \
 "\n" \
 "		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f += 1; }	// balanced\n" \
@@ -1284,7 +1284,7 @@ static const char * const src_ocl_kernel = \
 "		storeRNS_K(&xi[j], setK_i32(ri));\n" \
 "	}\n" \
 "\n" \
-"	f += get_i32(y[CARRY_LENGTH - 1], P1);\n" \
+"	f += get_i32(y[CARRY_LENGTH - 1], P0);\n" \
 "	const int_32 r1 = (int_32)(f);\n" \
 "\n" \
 "	storeRNS_K(&xi[CARRY_LENGTH - 1], setK_i32(r1));\n" \

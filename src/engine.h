@@ -17,17 +17,7 @@ typedef cl_int		int_32;
 typedef cl_ulong	uint_64;
 typedef cl_long		int_64;
 
-class ZP
-{
-protected:
-	uint_32 _n;
-
-public:
-	ZP() {}
-	explicit ZP(const uint_32 n) : _n(n) {}
-
-	uint_32 get() const { return _n; }
-};
+typedef uint_32		ZP;
 
 #define	CARRY_LENGTH	4u
 
