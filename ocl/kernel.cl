@@ -1160,17 +1160,43 @@ typedef int_32 small_type;	// 32-bit, size = PCK_FACTOR * 32 > PCK_FACTOR * LBAS
 
 INLINE big_type big_zero() { return 0; }
 INLINE big_type big_neg(const big_type x) { return -x; }
+INLINE big_type big_inc(const big_type x) { return x + 1; }
 INLINE big_type big_add(const big_type x, const big_type y) { return x + y; }
-INLINE big_type big_mul_u32(const big_type x, const uint_32 y) { return x * (big_type)(y); }
+INLINE big_type big_add_pck(const big_type x, const pck_type r) { return x + (big_type)(r); }
+INLINE big_type big_add_small(const big_type x, const small_type y) { return x + y; }
 INLINE big_type big_sub_small(const big_type x, const small_type y) { return x - y; }
+INLINE big_type big_mul_u32(const big_type x, const uint_32 y) { return x * (big_type)(y); }
 
 INLINE small_type getS_i(const RNS_S r) { return garner1(r.r[0]); }
 INLINE big_type getK_i(const RNS_K r) { return garner2(r.r[0], r.r[1]); }
 
+INLINE pck_type extract_r(big_type * const f)
+{
+	const pck_type r = (uint_32)(*f) & (BASE - 1);
+	(*f) >>= LBASE;
+	return r;
+}
+
+INLINE RNS_K extract_encode(big_type * const f)
+{
+	const pck_type re = extract_r(f);
+	int_32 ri = (int_32)(re);
+	if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); (*f) = big_inc((*f)); }	// balanced
+	return setK_i32(ri);
+}
+
+INLINE RNS_K extract_encode_last(const big_type f)
+{
+	const int_32 r1 = (int_32)(f);
+	return setK_i32(r1);
+}
+
 #elif (PRM_COUNT == 4)	// PCK_FACTOR = 2
 
+#define BASE2		((uint_64)(1) << (2 * LBASE))
+
 typedef struct { uint_64 s0; int_64 s1; } big_type;	// 128-bit, size = PRM_COUNT * 32 > LN + 2 * LBASE
-typedef uint2_32 pck_type;	// vector type of size PCK_FACTOR
+typedef uint_64 pck_type;	// vector type of size PCK_FACTOR
 typedef int_64 small_type;	// 64-bit, size = PCK_FACTOR * 32 > PCK_FACTOR * LBASE
 
 INLINE big_type big_zero() { big_type r; r.s0 = 0; r.s1 = 0; return r; }
@@ -1180,19 +1206,6 @@ INLINE big_type big_neg(const big_type x)
 	big_type r;
 	r.s0 = -x.s0;
 	r.s1 = -x.s1 - ((x.s0 != 0) ? 1 : 0);
-	return r;
-}
-
-INLINE big_type big_add(const big_type x, const big_type y)
-{
-	big_type r;
-// #if defined(PTX_ASM)
-// 	asm volatile ("add.cc.u64 %0, %1, %2;" : "=r" (r.s0) : "r" (x.s0), "r" (y.s0));
-// 	asm volatile ("addc.s64 %0, %1, %2;" : "=r" (r.s1) : "r" (x.s1), "r" (y.s1));
-// #else
-	r.s0 = x.s0 + y.s0;
-	r.s1 = x.s1 + y.s1 + ((r.s0 < x.s0) ? 1 : 0);
-// #endif
 	return r;
 }
 
@@ -1209,7 +1222,7 @@ INLINE big_type big_add_u64(const big_type x, const uint_64 y)
 	return r;
 }
 
-INLINE big_type big_add_i64(const big_type x, const small_type y)
+INLINE big_type big_add_s64(const big_type x, const int_64 y)
 {
 	big_type r;
 	r.s0 = x.s0 + (uint_64)(y);
@@ -1217,11 +1230,30 @@ INLINE big_type big_add_i64(const big_type x, const small_type y)
 	return r;
 }
 
-INLINE big_type big_sub_small(const big_type x, const int_64 y)
+INLINE big_type big_inc(const big_type x) { return big_add_u64(x, 1); }
+
+INLINE big_type big_add(const big_type x, const big_type y)
 {
 	big_type r;
-	r.s0 = x.s0 - (uint_64)(y);
-	r.s1 = x.s1 - ((y < 0) ? -1 : 0) - ((x.s0 < (uint_64)(y)) ? 1 : 0);
+// #if defined(PTX_ASM)
+// 	asm volatile ("add.cc.u64 %0, %1, %2;" : "=r" (r.s0) : "r" (x.s0), "r" (y.s0));
+// 	asm volatile ("addc.s64 %0, %1, %2;" : "=r" (r.s1) : "r" (x.s1), "r" (y.s1));
+// #else
+	r.s0 = x.s0 + y.s0;
+	r.s1 = x.s1 + y.s1 + ((r.s0 < x.s0) ? 1 : 0);
+// #endif
+	return r;
+}
+
+INLINE big_type big_add_pck(const big_type x, const pck_type r) { return big_add_u64(x, r); }
+INLINE big_type big_add_small(const big_type x, const small_type y) { return big_add_s64(x, y); }
+INLINE big_type big_sub_small(const big_type x, const small_type y) { return big_add_s64(x, -y); }
+
+INLINE big_type big_mul_u32(const big_type x, const uint_32 y)
+{
+	big_type r;
+	r.s0 = x.s0 * y;
+	r.s1 = x.s1 * (int_64)(y) + (int_64)(mul_hi(x.s0, (uint_64)(y)));
 	return r;
 }
 
@@ -1230,14 +1262,6 @@ INLINE big_type big_rshift(const big_type x, const int s)	// s != 0
 	big_type r;
 	r.s0 = (x.s0 >> s) | (uint_64)(x.s1 << (64 - s));
 	r.s1 = x.s1 >> s;
-	return r;
-}
-
-INLINE big_type big_mul_u32(const big_type x, const uint_32 y)
-{
-	big_type r;
-	r.s0 = x.s0 * y;
-	r.s1 = x.s1 * (int_64)(y) + (int_64)(mul_hi(x.s0, (uint_64)(y)));
 	return r;
 }
 
@@ -1266,123 +1290,27 @@ INLINE big_type garner4(const ZP r0, const ZP r1, const ZP r2, const ZP r3)
 INLINE small_type getS_i(const RNS_S r) { return garner2(r.r[0], r.r[1]); }
 INLINE big_type getK_i(const RNS_K r) { return garner4(r.r[0], r.r[1], r.r[2], r.r[3]); }
 
-#endif
-
-#if (PRM_COUNT == 2)
-
 INLINE pck_type extract_r(big_type * const f)
 {
-	const pck_type r = (uint_32)(*f) & (BASE - 1);
-	(*f) >>= LBASE;
+	const pck_type r = (*f).s0 & (BASE2 - 1);
+	(*f) = big_rshift((*f), 2 * LBASE);
 	return r;
 }
 
-INLINE void carry_2(__global ZP * restrict const xi, const __local big_type * const cl, const pck_type r[CARRY_LENGTH], const sz_t lid)
+INLINE RNS_K extract_encode(big_type * const f)
 {
-	big_type f = (lid != 0) ? cl[lid - 1] : 0;
-	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)
-	{
-		f += r[j];
-		int_32 ri = (int_32)extract_r(&f);
-
-		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f += 1; }	// balanced
-
-		storeRNS_K(&xi[j], setK_i32(ri));
-	}
-
-	f += r[CARRY_LENGTH - 1];
-	const int_32 r1 = (int_32)(f);
-
-	storeRNS_K(&xi[CARRY_LENGTH - 1], setK_i32(r1));
+	const pck_type re = extract_r(f);
+	const uint_32 r1 = (uint_32)(re) & (BASE - 1);
+	int_32 r2 = (int_32)(re >> LBASE);
+	if (r2 >= (int_32)(BASE / 2)) { r2 -= (int_32)(BASE); (*f) = big_inc((*f)); }	// balanced
+	return addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));
 }
 
-INLINE void carry_3(__global ZP * restrict const xi, __global const big_type * restrict const carry, const int_32 is_nega, const sz_t id)
+INLINE RNS_K extract_encode_last(const big_type f)
 {
-	// assert CARRY_LENGTH = 4
-	const ZP4 x4 = load4g(xi, 0 * Z_OFFSET / 4);
-	ZP y[4]; y[0] = x4.s0; y[1] = x4.s1; y[2] = x4.s2; y[3] = x4.s3;
-
-	big_type f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];
-	if ((id == 0) && (is_nega != 0)) f = -f;
-	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)
-	{
-		f += get_i32(y[j], P0);
-		int_32 ri = (int_32)extract_r(&f);
-
-		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f += 1; }	// balanced
-
-		storeRNS_K(&xi[j], setK_i32(ri));
-	}
-
-	f += get_i32(y[CARRY_LENGTH - 1], P0);
-	const int_32 r1 = (int_32)(f);
-
-	storeRNS_K(&xi[CARRY_LENGTH - 1], setK_i32(r1));
-}
-
-#elif (PRM_COUNT == 4)
-
-INLINE pck_type extract_r(big_type * const f)
-{
-	pck_type r;
-	r.s0 = (uint_32)((*f).s0) & (BASE - 1);
-	(*f) = big_rshift((*f), LBASE);
-	r.s1 = (uint_32)((*f).s0) & (BASE - 1);
-	(*f) = big_rshift((*f), LBASE);
-	return r;
-}
-
-INLINE void carry_2(__global ZP * restrict const xi, const __local big_type * const cl, const pck_type r[CARRY_LENGTH], const sz_t lid)
-{
-	big_type f = (lid != 0) ? cl[lid - 1] : big_zero();
-	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)
-	{
-		f = big_add_u64(f, r[j].s0 | ((uint_64)(r[j].s1) << LBASE));
-		const pck_type re = extract_r(&f);
-
-		int_32 ri = (int_32)(re.s1);
-		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f = big_add_u64(f, 1); }	// balanced
-
-		const RNS_K u = addmodK(setK_u32(re.s0), mulmodK(setK_i32(ri), RBASE_K()));
-		storeRNS_K(&xi[j], u);
-	}
-
-	f = big_add_u64(f, r[CARRY_LENGTH - 1].s0 | ((uint_64)(r[CARRY_LENGTH - 1].s1) << LBASE));
 	const uint_32 r1 = (uint_32)(f.s0) & (BASE - 1);
-	f = big_rshift(f, LBASE);
-	const int_32 r2 = (int_32)(f.s0);
-
-	const RNS_K u = addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));
-	storeRNS_K(&xi[CARRY_LENGTH - 1], u);
-}
-
-INLINE void carry_3(__global ZP * restrict const xi, __global const big_type * restrict const carry, const int_32 is_nega, const sz_t id)
-{
-	// assert CARRY_LENGTH = 4
-	ZP4 x4[PCK_FACTOR]; for (sz_t l = 0; l < PCK_FACTOR; ++l) x4[l] = load4g(xi, l * Z_OFFSET / 4);
-	RNS_S y[4]; for (sz_t l = 0; l < PCK_FACTOR; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }
-
-	big_type f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];
-	if ((id == 0) && (is_nega != 0)) f = big_neg(f);
-	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)
-	{
-		f = big_add_i64(f, getS_i(y[j]));
-		const pck_type re = extract_r(&f);
-
-		int_32 ri = (int_32)(re.s1);
-		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f = big_add_u64(f, 1); }	// balanced
-
-		const RNS_K u = addmodK(setK_u32(re.s0), mulmodK(setK_i32(ri), RBASE_K()));
-		storeRNS_K(&xi[j], u);
-	}
-
-	f = big_add_i64(f, getS_i(y[CARRY_LENGTH - 1]));
-	const uint_32 r1 = (uint_32)(f.s0) & (BASE - 1);
-	f = big_rshift(f, LBASE);
-	const int_32 r2 = (int_32)(f.s0);
-
-	const RNS_K u = addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));
-	storeRNS_K(&xi[CARRY_LENGTH - 1], u);
+	const int_32 r2 = (int_32)(f.s0 >> LBASE);
+	return addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));
 }
 
 #endif
@@ -1406,6 +1334,41 @@ INLINE void carry_mul_sub_1(const __global ZP * restrict const xi, __global cons
 	const sz_t lid = id % CARRY_WG_SZ;
 	cl[lid] = f;
 	if (lid == CARRY_WG_SZ - 1) carry[id / CARRY_WG_SZ] = f;
+}
+
+INLINE void carry_2(__global ZP * restrict const xi, const __local big_type * const cl, const pck_type r[CARRY_LENGTH], const sz_t lid)
+{
+	big_type f = (lid != 0) ? cl[lid - 1] : big_zero();
+	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)
+	{
+		f = big_add_pck(f, r[j]);
+		const RNS_K u = extract_encode(&f);
+		storeRNS_K(&xi[j], u);
+	}
+
+	f = big_add_pck(f, r[CARRY_LENGTH - 1]);
+	const RNS_K u = extract_encode_last(f);
+	storeRNS_K(&xi[CARRY_LENGTH - 1], u);
+}
+
+INLINE void carry_3(__global ZP * restrict const xi, __global const big_type * restrict const carry, const int_32 is_nega, const sz_t id)
+{
+	// assert CARRY_LENGTH = 4
+	ZP4 x4[PCK_FACTOR]; for (sz_t l = 0; l < PCK_FACTOR; ++l) x4[l] = load4g(xi, l * Z_OFFSET / 4);
+	RNS_S y[4]; for (sz_t l = 0; l < PCK_FACTOR; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }
+
+	big_type f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];
+	if ((id == 0) && (is_nega != 0)) f = big_neg(f);
+	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)
+	{
+		f = big_add_small(f, getS_i(y[j]));
+		const RNS_K u = extract_encode(&f);
+		storeRNS_K(&xi[j], u);
+	}
+
+	f = big_add_small(f, getS_i(y[CARRY_LENGTH - 1]));
+	const RNS_K u = extract_encode_last(f);
+	storeRNS_K(&xi[CARRY_LENGTH - 1], u);
 }
 
 __kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))
