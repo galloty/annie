@@ -214,7 +214,7 @@ public:
 	}
 
 public:
-	EReturn check(const mpz_t & n, const std::string & expression, const size_t device, const bool verbose = true)
+	EReturn check(const mpz_t & n, const std::string & expression, const bool isEuler, const int a_ref, const size_t device, const bool verbose = true)
 	{
 		const size_t nsize = digits(n);
 		const std::string ns = (expression.size() <= 40) ? expression : mpz_to_short_string(n);
@@ -247,11 +247,16 @@ public:
 		}
 
 		int32_t a = 2;
-		while (mpz_si_kronecker(a, n) != -1) { ++a; const int32_t s = std::lround(std::sqrt(double(a))); if (s * s == a) ++a; }
+		if (isEuler)
+		{
+			while (mpz_si_kronecker(a, n) != -1) { ++a; const int32_t s = std::lround(std::sqrt(double(a))); if (s * s == a) ++a; }
+		}
+		else if (a_ref != 0) a = a_ref;
 
 		if (verbose)
 		{
-			std::ostringstream ss; ss << "Running Euler probable primality test of " << ns << " to base " << a << " [" << nsize << " digits]" << std::endl;
+			std::ostringstream ss; ss << "Running " << (isEuler ? "Euler" : "Fermat");
+			ss << " probable primality test of " << ns << " to base " << a << " [" << nsize << " digits]" << std::endl;
 			print(ss.str());
 		}
 
@@ -286,7 +291,8 @@ public:
 		_checkpoint_filename = ss.str();
 
 		mpz_t exponent; mpz_init(exponent);
-		mpz_set(exponent, n); mpz_sub_ui(exponent, exponent, 1); mpz_fdiv_q_2exp(exponent, exponent, 1);
+		mpz_set(exponent, n); mpz_sub_ui(exponent, exponent, 1);
+		if (isEuler) mpz_fdiv_q_2exp(exponent, exponent, 1);
 
 		const int B_GL = B_GerbiczLi(mpz_sizeinbase(exponent, 2));
 
@@ -338,15 +344,22 @@ public:
 		p_transform->copy(transform::Reg2, transform::Reg0);
 		p_transform->mul(transform::Reg2, transform::Reg1);
 
-		mpz_t t; mpz_init(t);
+		mpz_t t; mpz_init(t); p_transform->get(t, transform::Reg0);
 
-		// result ?= -1
-		p_transform->get(t, transform::Reg0);
-		mpz_add_ui(t, t, 1); if (mpz_cmp(t, n) >= 0) mpz_sub(t, t, n);
+		if (isEuler)
+		{
+			// result ?= -1
+			mpz_add_ui(t, t, 1); if (mpz_cmp(t, n) >= 0) mpz_sub(t, t, n);
+
+			// a^(n - 1) mod n
+			p_transform->square_mul(1);
+		}
+		else
+		{
+			// result ?= 1
+			mpz_sub_ui(t, t, 1);
+		}
 		const bool is_prp = (mpz_sgn(t) == 0);
-
-		// a^(n - 1) mod n
-		p_transform->square_mul(1);
 
 		// 64-bit residue 
 		p_transform->get(t, transform::Reg0);
@@ -400,8 +413,8 @@ public:
 		{
 			if (is_prp)
 			{
-				std::ostringstream ss; ss << ns << " is a probable prime, a = " << a
-					<< ", time = " << timer::format_time(elapsed_time) << "." << std::endl;
+				std::ostringstream ss; ss << ns << " is a " << (isEuler ? "Euler" : "Fermat");
+				ss << " probable prime, a = " << a << ", time = " << timer::format_time(elapsed_time) << "." << std::endl;
 				result(ss.str());
 			}
 			else if (verbose)

@@ -267,12 +267,12 @@ private:
 		_executeKernel(kernel, _prm_count << (LN - 3), wg_size);
 	}
 
-	void execute_kernel_fb(cl_kernel & kernel, const size_t reg_x, const size_t reg_w, const int lm, const size_t s, const size_t wg_size = 0)
+	void execute_kernel_fb(cl_kernel & kernel, const size_t reg_x, const size_t reg_w, const int lm, const size_t s)
 	{
 		const int_32 lm32 = int_32(lm); const uint_32 s32 = uint_32(s);
 		_setKernelArg(kernel, 3, sizeof(int_32), &lm32);
 		_setKernelArg(kernel, 4, sizeof(uint_32), &s32);
-		execute_kernel(kernel, reg_x, reg_w, wg_size);
+		execute_kernel(kernel, reg_x, reg_w);
 	}
 
 	void execute_kernel_mul(cl_kernel & kernel, const size_t reg_x, const size_t reg_xp, const size_t reg_w, const size_t wg_size = 0)

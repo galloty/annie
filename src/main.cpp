@@ -137,11 +137,13 @@ private:
 		ss << "Usage: annie [options]" << std::endl;
 		ss << "  -q \"expression\"     a Pari/GP math expression, it must be an integer" << std::endl;
 		ss << "  -f <filename>       a long expression can be written to the file <filename>" << std::endl;
+		ss << "  -fermat <a>         check if n is a Fermat probable prime to base a (default a = 2)" << std::endl;
+		ss << "  -euler              check if n is an Euler probable prime" << std::endl;
 		ss << "  -d <n>              set the OpenCL device number (default 0)" << std::endl;
 		ss << "  -h                  validate and bench hardware" << std::endl;
-		ss << " annie checks if the integer n is an Euler probable prime to base a," << std::endl;
-		ss << " where a is the smallest integer such that the Jacobi symbol (a/n) = -1." << std::endl;
-		ss << " If n is a Proth number then the test is a primality proof (Proth's theorem)." << std::endl;
+		ss << " annie checks if the integer n is a Fermat or Euler probable prime to base a." << std::endl;
+		ss << " For Euler probable prime, a is the smallest integer such that the Jacobi symbol (a/n) = -1." << std::endl;
+		ss << " If n is a Proth number then this test is a primality proof (Proth's theorem)." << std::endl;
 		ss << std::endl;
 		return ss.str();
 	}
@@ -164,7 +166,7 @@ public:
 			const std::string expression = "fibonacci(" + std::to_string(i) + ")";
 			mpz_fib_ui(n, i);
 
-			const annie::EReturn ret = _instance->check(n, expression, 0);
+			const annie::EReturn ret = _instance->check(n, expression, false, 0, 0);
 			if (ret != annie::EReturn::Success)
 			{
 				if (ret == annie::EReturn::Failed) std::cout << expression << ": validation failed!";
@@ -177,7 +179,8 @@ public:
 #else
 		std::string expression, filename;
 		size_t device = 0;
-		bool bench = false;
+		bool isEuler = false, bench = false;
+		int a = 0;
 
 		// parse args
 		for (size_t i = 0, size = args.size(); i < size; ++i)
@@ -189,20 +192,31 @@ public:
 				if (!filename.empty() || bench) throw std::runtime_error("-q used with an incompatible option (-f, -h)");
 				expression = ((arg == "-q") && (i + 1 < size)) ? args[++i] : arg.substr(2);
 			}
-			if (arg.substr(0, 2) == "-f")
+			else if (arg.substr(0, 7) == "-fermat")
+			{
+				if (isEuler) throw std::runtime_error("-fermat used with an incompatible option (-euler)");
+				const std::string astr = ((arg == "-fermat") && (i + 1 < size)) ? args[++i] : arg.substr(7);
+				a = size_t(std::atoi(astr.c_str()));
+			}
+			else if (arg.substr(0, 6) == "-euler")
+			{
+				if (a != 0) throw std::runtime_error("-euler used with an incompatible option (-fermat)");
+				isEuler = true;
+			}
+			else if (arg.substr(0, 2) == "-f")
 			{
 				if (!expression.empty() || bench) throw std::runtime_error("-f used with an incompatible option (-q, -h)");
 				filename = ((arg == "-f") && (i + 1 < size)) ? args[++i] : arg.substr(2);
 			}
-			if (arg.substr(0, 2) == "-h")
-			{
-				if (!filename.empty() || !expression.empty()) throw std::runtime_error("-h used with an incompatible option (-q, -f)");
-				bench = true;
-			}
-			if (arg.substr(0, 2) == "-d")
+			else  if (arg.substr(0, 2) == "-d")
 			{
 				const std::string dstr = ((arg == "-d") && (i + 1 < size)) ? args[++i] : arg.substr(2);
 				device = size_t(std::atoi(dstr.c_str()));
+			}
+			else if (arg.substr(0, 2) == "-h")
+			{
+				if (!filename.empty() || !expression.empty()) throw std::runtime_error("-h used with an incompatible option (-q, -f)");
+				bench = true;
 			}
 		}
 
@@ -250,7 +264,7 @@ public:
 		mpz_t n; mpz_init_set_str(n, n_str.c_str(), 10);
 
 		_instance = new annie();
-		const annie::EReturn ret = _instance->check(n, expression, device);
+		const annie::EReturn ret = _instance->check(n, expression, isEuler, a, device);
 		mpz_clear(n);
 
 		if (ret == annie::EReturn::Failed) std::cout << "Validation failed!";

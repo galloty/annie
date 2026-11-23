@@ -180,7 +180,7 @@ public:
 	explicit RNS1(const uint_32 n) : RNS(n) {}
 	explicit RNS1(const uint_32 * const n) : RNS(n) {}
 
-	big_type get_i32() const { return big_type(garner1()); }
+	big_type getS_i() const { return big_type(garner1()); }
 };
 
 class RNS2 : public RNS<2>
@@ -208,7 +208,29 @@ public:
 	explicit RNS2(const uint_32 n) : RNS(n) {}
 	explicit RNS2(const uint_32 * const n) : RNS(n) {}
 
-	big_type get_i64() const { return garner2(); }
+	big_type getS_i() const { return garner2(); }
+};
+
+class RNS3 : public RNS<3>
+{
+public:
+	// typedef int_96 big_type;
+
+public:
+	RNS3() {}
+	explicit RNS3(const uint_32 n) : RNS(n) {}
+	explicit RNS3(const uint_32 * const n) : RNS(n) {}
+
+	RNS3 & operator+=(const RNS3 & rhs) { _add(rhs); return *this; }
+	RNS3 & operator-=(const RNS3 & rhs) { _sub(rhs); return *this; }
+	RNS3 & operator*=(const RNS3 & rhs) { _mul(rhs); return *this; }
+
+	RNS3 operator+(const RNS3 & rhs) const { RNS3 r = *this; r += rhs; return r; }
+	RNS3 operator-(const RNS3 & rhs) const { RNS3 r = *this; r -= rhs; return r; }
+	RNS3 operator*(const RNS3 & rhs) const { RNS3 r = *this; r *= rhs; return r; }
+
+	RNS3 toMonty() const { RNS3 r = *this; r._toMonty(); return r; }
+	static RNS3 norm(const int ln) { RNS3 r; r._norm(ln); return r; }
 };
 
 class RNS4 : public RNS<4>
@@ -231,6 +253,8 @@ public:
 
 	RNS4 toMonty() const { RNS4 r = *this; r._toMonty(); return r; }
 	static RNS4 norm(const int ln) { RNS4 r; r._norm(ln); return r; }
+
+	void encode(const ZP & rhs, const RNS4 & base) { *this *= base; *this += RNS4(rhs); }
 };
 
 template<int LN>
@@ -262,7 +286,7 @@ private:
 		return uint_32(r);
 	}
 
-	finline static constexpr void write_word(mp_limb_t * const x_ptr, const size_t bit_index, const uint_32 r)
+	finline static constexpr void write_word(mp_limb_t * const x_ptr, const size_t bit_index, const uint_64 r)
 	{
 		const size_t limb_index = bit_index / 64;
 		const int limb_shift = int(bit_index % 64);
@@ -275,7 +299,8 @@ private:
 		const size_t n = size_t(1) << LN;
 		const int lbase = _lbase;
 		const uint_32 base = 1u << lbase;
-		const size_t  prm_count = _prm_count;
+		const size_t prm_count = _prm_count;
+		const RNS4 rbase4 = RNS4(1u << lbase).toMonty();
 		ZP * const buf = _buf;
 
 		const size_t x_size = mpz_size(x);
@@ -307,15 +332,14 @@ private:
 		{
 			if (prm_count == 2)
 			{
-				RNS2 r = RNS2(buf[0 * n + i]);
+				const RNS2 r = RNS2(buf[0 * n + i]);
 				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
 			}
 			else if (prm_count == 4)
 			{
-				const RNS4 rbase = RNS4(1u << lbase).toMonty();
-
 				RNS4 r = RNS4(buf[1 * n + i]);
-				r = r * rbase + RNS4(buf[0 * n + i]);	// TODO move to RNS4 (encode)
+				r.encode(buf[0 * n + i], rbase4);
+
 				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
 			}
 			else {}	// TODO
@@ -341,11 +365,11 @@ private:
 		long fr = 0;
 		if (_pck_factor == 1)
 		{
-			int_64 f = 0;	// TODO int_32
+			RNS1::big_type f = 0;
 			size_t bit_index = 0;
 			for (size_t i = 0; i < n; ++i)
 			{
-				f += RNS1(buf[i]).get_i32();
+				f += RNS1(buf[i]).getS_i();
 				const uint_32 r = uint_32(f) & (base - 1);
 				f >>= lbase;
 
@@ -356,21 +380,18 @@ private:
 		}
 		else if (_pck_factor == 2)
 		{
-			int_64 f = 0;
+			const uint_64 base2 = base * uint_64(base);
+			RNS2::big_type f = 0;
 			size_t bit_index = 0;
 			for (size_t i = 0; i < n; ++i)
 			{
 				uint_32 u[_pck_factor]; for (size_t l = 0; l < _pck_factor; ++l) u[l] = buf[l * n + i];
-				f += RNS2(u).get_i64();
-				const uint_32 r1 = (uint_32)(f) & (base - 1);	// TODO 64-bit extract_r
-				f >>= lbase;
-				const uint_32 r2 = (uint_32)(f) & (base - 1);
-				f >>= lbase;
+				f += RNS2(u).getS_i();
+				const uint_64 r = (uint_64)(f) & (base2 - 1);
+				f >>= 2 * lbase;
 
-				write_word(y_ptr, bit_index, r1);
-				bit_index += size_t(lbase);
-				write_word(y_ptr, bit_index, r2);
-				bit_index += size_t(lbase);
+				write_word(y_ptr, bit_index, r);
+				bit_index += size_t(2 * lbase);
 			}
 			fr = long(f);
 		}
@@ -730,13 +751,13 @@ public:
 	std::string get_info_short() const override
 	{
 		const size_t n = size_t(1) << LN;
-		std::ostringstream ss; ss << "length " << n << "x" << _pck_factor << "x" << _lbase << " bits";
+		std::ostringstream ss; ss << _prm_count << "-prime NTT of length " << n << "x" << _pck_factor << "x" << _lbase << " bits";
 		return (ss.str());
 	}
 
 	std::string get_info() const override
 	{
-		std::ostringstream ss; ss << "Montgomery-McLaughlin-Gallot-Woltman reduction of " << get_info_short() << std::endl << _hinfo << std::endl;
+		std::ostringstream ss; ss << "Montgomery-McLaughlin-Gallot-Woltman reduction, " << get_info_short() << std::endl << _hinfo << std::endl;
 		return (ss.str());
 	}
 };
