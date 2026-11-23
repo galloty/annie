@@ -75,12 +75,28 @@ public:
 	static ZP _primroot_n(const int ln, const size_t k) { return ZP(_pow(Mod::toMonty(primroot[k], k), (P[k] - 1) >> ln, k)); }
 
 public:
-	static const size_t PSIZE = 4;
-	static constexpr uint_32 P[PSIZE] = { (125u << 25) + 1, (243u << 24) + 1, (235u << 24) + 1, (29u << 27) + 1 };
-	static constexpr uint_32 Q[PSIZE] = { _invert(P[0]), _invert(P[1]), _invert(P[2]), _invert(P[3]) };
-	static constexpr uint_32 primroot[PSIZE] = { 3, 7, 3, 3 };
-	static constexpr uint_32 one[PSIZE] = { _one(P[0]), _one(P[1]), _one(P[2]), _one(P[3]) };
-	static constexpr uint_32 rsq[PSIZE] = { _rsq(one[0], P[0]), _rsq(one[1], P[1]), _rsq(one[2], P[2]), _rsq(one[3], P[3]) };
+	static const size_t PSIZE = 14;
+	static constexpr uint_32 P[PSIZE] = { // 2^32 > P0 > P1 > ... > P13 > 2^31
+		(125u << 25) + 1, (243u << 24) + 1, (235u << 24) + 1, (29u << 27) + 1,
+		(13u << 28) + 1, (193u << 24) + 1, (3u << 30) + 1, (43u << 26) + 1,
+		(171u << 24) + 1, (81u << 25) + 1, (157u << 24) + 1, (151u << 24) + 1, 
+		(37u << 26) + 1, (17u << 27) + 1 };
+	static constexpr uint_32 Q[PSIZE] = {
+		_invert(P[0]), _invert(P[1]), _invert(P[2]), _invert(P[3]),
+		_invert(P[4]), _invert(P[5]), _invert(P[6]), _invert(P[7]),
+		_invert(P[8]), _invert(P[9]), _invert(P[10]), _invert(P[11]),
+		_invert(P[12]), _invert(P[13]) };
+	static constexpr uint_32 primroot[PSIZE] = { 3, 7, 3, 3, 3, 3, 5, 3, 35, 5, 3, 3, 3, 3 };
+	static constexpr uint_32 one[PSIZE] = {
+		_one(P[0]), _one(P[1]), _one(P[2]), _one(P[3]),
+		_one(P[4]), _one(P[5]), _one(P[6]), _one(P[7]),
+		_one(P[8]), _one(P[9]), _one(P[10]), _one(P[11]),
+		_one(P[12]), _one(P[13]) };
+	static constexpr uint_32 rsq[PSIZE] = {
+		_rsq(one[0], P[0]), _rsq(one[1], P[1]), _rsq(one[2], P[2]), _rsq(one[3], P[3]),
+		_rsq(one[4], P[4]), _rsq(one[5], P[5]), _rsq(one[6], P[6]), _rsq(one[7], P[7]),
+		_rsq(one[8], P[8]), _rsq(one[9], P[9]), _rsq(one[10], P[10]), _rsq(one[11], P[11]),
+		_rsq(one[12], P[12]), _rsq(one[13], P[13]) };
 
 	static int_32 get_i32(const ZP & lhs, const size_t k) { return int_32(lhs - ((lhs >= P[k] / 2) ? P[k] : 0)); }
 
@@ -765,7 +781,7 @@ public:
 	std::string get_info_short() const override
 	{
 		const size_t n = size_t(1) << LN;
-		std::ostringstream ss; ss << _prm_count << "-prime NTT of length " << n << "x" << _pck_factor << "x" << _lbase << " bits";
+		std::ostringstream ss; ss << _prm_count << "-prime NTT of length " << n << ", packed-base = 2^{" << _pck_factor << "x" << _lbase << "} bits";
 		return (ss.str());
 	}
 
@@ -794,35 +810,37 @@ inline void get_n_base(int & rln, int & rlbase, const int pck_factor, const doub
 	}
 }
 
+inline size_t get_s(const size_t K)
+{
+	int s = -1; for (size_t k = K - 1; k != 0; k /= 2) ++s;
+	return size_t(1) << s;
+}
 inline transform * create_transformGPU(const mpz_t & N, const int32_t a, const size_t device_id)
 {
 	// R = base^n - 1, Q = base^n + 1 such that base^n > 16 * a * N and n is a power of two
 	long e_n; const double m_n = mpz_get_d_2exp(&e_n, N);
 	const double log2_16aN = std::log2(16.0 * a) + std::log2(m_n) + e_n;
 
-	const double p_2a2 = Mod::P[0] * double(Mod::P[1]) / 2 / a;
-	int ln2 = 0, lbase2 = 0; get_n_base(ln2, lbase2, 1, log2_16aN, p_2a2);
-	const double p_2a3 = p_2a2 * double(Mod::P[2]);
-	int ln3 = 0, lbase3 = 0; get_n_base(ln3, lbase3, 2, log2_16aN, p_2a3);
-	const double p_2a4 = p_2a3 * double(Mod::P[3]);
-	int ln4 = 0, lbase4 = 0; get_n_base(ln4, lbase4, 2, log2_16aN, p_2a4);
+	double p_2a = double(Mod::P[0]) / 2 / a;
+	uint64_t c_min = uint64_t(-1), c_2 = 0; size_t K_min = 0;
+	for (size_t K = 2; K < 5; ++K)	// Mod::PSIZE
+	{
+		p_2a *= double(Mod::P[K - 1]);
+		const size_t s = get_s(K);
+		int ln = 0, lbase = 0; get_n_base(ln, lbase, s, log2_16aN, p_2a);
 
-	// const double c2 = 2 * double(1u << ln2) * ln2;
-	// const double c3 = 3 * double(1u << ln3) * ln3;
-	// const double c4 = 4 * double(1u << ln4) * ln4;
-	// std::cout << "K = " << 2 << ": ln = " << ln2 << ", lbase = " << lbase2 << ", r = " << 1 << ", K*n*ln = " << c2 << std::endl;
-	// std::cout << "K = " << 3 << ": ln = " << ln3 << ", lbase = " << lbase3 << ", r = " << 2 << ", K*n*ln = " << c3 << std::endl;
-	// std::cout << "K = " << 4 << ": ln = " << ln4 << ", lbase = " << lbase4 << ", r = " << 2 << ", K*n*ln = " << c4 << std::endl;
-	// return nullptr;
+		const uint64_t c = K * uint64_t(1u << ln) * uint64_t(ln);
+		if (c < c_min) { c_min = c; K_min = K; }
+		if (K == 2) c_2 = c;
 
-	const size_t prm_count = 2, pck_factor = 1;
-	int ln = ln2, lbase = lbase2;
+		std::cout << "K = " << K << ": ln = " << ln << ", lbase = " << lbase << ", s = " << s << ", K*n*ln = " << c << std::endl;
+	}
+	std::cout << "K_min = " << K_min << ", K*n*ln = " << c_min << ", " << c_min / double(c_2) << std::endl;
 
-	// const size_t prm_count = 3, pck_factor = 2;
-	// int ln = ln3, lbase = lbase3;
+	const size_t prm_count = K_min, pck_factor = get_s(K_min);
 
-	// const size_t prm_count = 4, pck_factor = 2;
-	// int ln = ln4, lbase = lbase4;
+	p_2a = double(Mod::P[0]) / 2 / a; for (size_t k = 1; k < prm_count; ++k) p_2a *= double(Mod::P[k]);
+	int ln = 0, lbase = 0; get_n_base(ln, lbase, pck_factor, log2_16aN, p_2a);
 
 #if defined(QUICK_TEST)
 	if (ln < 4) throw std::runtime_error("NTT size < 2^4 is not supported");
