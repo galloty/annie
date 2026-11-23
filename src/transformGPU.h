@@ -231,6 +231,8 @@ public:
 
 	RNS3 toMonty() const { RNS3 r = *this; r._toMonty(); return r; }
 	static RNS3 norm(const int ln) { RNS3 r; r._norm(ln); return r; }
+
+	void encode(const ZP & rhs, const RNS3 & base) { *this *= base; *this += RNS3(rhs); }
 };
 
 class RNS4 : public RNS<4>
@@ -300,7 +302,6 @@ private:
 		const int lbase = _lbase;
 		const uint_32 base = 1u << lbase;
 		const size_t prm_count = _prm_count;
-		const RNS4 rbase4 = RNS4(1u << lbase).toMonty();
 		ZP * const buf = _buf;
 
 		const size_t x_size = mpz_size(x);
@@ -328,22 +329,35 @@ private:
 		}
 		else {}	// TODO
 
-		for (size_t i = 0; i < n; ++i)
+		if (prm_count == 2)
 		{
-			if (prm_count == 2)
+			for (size_t i = 0; i < n; ++i)
 			{
 				const RNS2 r = RNS2(buf[0 * n + i]);
 				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
 			}
-			else if (prm_count == 4)
+		}
+		else if (prm_count == 3)
+		{
+			const RNS3 rbase3 = RNS3(1u << lbase).toMonty();
+			for (size_t i = 0; i < n; ++i)
+			{
+				RNS3 r = RNS3(buf[1 * n + i]);
+				r.encode(buf[0 * n + i], rbase3);
+				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
+			}
+		}
+		else if (prm_count == 4)
+		{
+			const RNS4 rbase4 = RNS4(1u << lbase).toMonty();
+			for (size_t i = 0; i < n; ++i)
 			{
 				RNS4 r = RNS4(buf[1 * n + i]);
 				r.encode(buf[0 * n + i], rbase4);
-
 				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
 			}
-			else {}	// TODO
 		}
+		else {}	// TODO
 
 		for (size_t k = 0; k < prm_count; ++k) _engine.write_memory(k * Reg_count + reg_y, &buf[k * n]);
 	}
@@ -803,6 +817,9 @@ inline transform * create_transformGPU(const mpz_t & N, const int32_t a, const s
 
 	const size_t prm_count = 2, pck_factor = 1;
 	int ln = ln2, lbase = lbase2;
+
+	// const size_t prm_count = 3, pck_factor = 2;
+	// int ln = ln3, lbase = lbase3;
 
 	// const size_t prm_count = 4, pck_factor = 2;
 	// int ln = ln4, lbase = lbase4;

@@ -600,7 +600,7 @@ INLINE void fwd8o(const ZP2 pq, __global ZP * restrict const x, __local ZP * res
 // --- transform without local mem ---
 
 #if (LN_SZ >= 21)
-__kernel
+__kernel	// TODO ZP4
 void forward8(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const int_32 lm, const uint_32 s)
 {
 	DECLARE_VAR_REG();
@@ -1160,8 +1160,8 @@ typedef int_32 small_type;	// 32-bit, size = PCK_FACTOR * 32 > PCK_FACTOR * LBAS
 
 INLINE big_type big_zero() { return 0; }
 INLINE big_type big_neg(const big_type x) { return -x; }
-INLINE big_type big_inc(const big_type x) { return x + 1; }
 INLINE big_type big_add(const big_type x, const big_type y) { return x + y; }
+INLINE big_type big_inc(const big_type x) { return x + 1; }
 INLINE big_type big_add_pck(const big_type x, const pck_type r) { return x + (big_type)(r); }
 INLINE big_type big_add_small(const big_type x, const small_type y) { return x + y; }
 INLINE big_type big_sub_small(const big_type x, const small_type y) { return x - y; }
@@ -1191,6 +1191,121 @@ INLINE RNS_K extract_encode_last(const big_type f)
 	return setK_i32(r1);
 }
 
+#elif (PRM_COUNT == 3)	// PCK_FACTOR = 2
+
+#define BASE2		((uint_64)(1) << (2 * LBASE))
+
+typedef struct { uint_64 s0; int_32 s1; } big_type;	// 96-bit, size = PRM_COUNT * 32 > LN + 2 * LBASE
+typedef uint_64 pck_type;	// vector type of size PCK_FACTOR
+typedef int_64 small_type;	// 64-bit, size = PCK_FACTOR * 32 > PCK_FACTOR * LBASE
+
+INLINE big_type big_zero() { big_type r; r.s0 = 0; r.s1 = 0; return r; }
+
+INLINE big_type big_neg(const big_type x)
+{
+	big_type r;
+	r.s0 = -x.s0;
+	r.s1 = -x.s1 - ((x.s0 != 0) ? 1 : 0);
+	return r;
+}
+
+INLINE big_type big_add(const big_type x, const big_type y)
+{
+	big_type r;
+// #if defined(PTX_ASM)
+// 	asm volatile ("add.cc.u64 %0, %1, %2;" : "=r" (r.s0) : "r" (x.s0), "r" (y.s0));
+// 	asm volatile ("addc.s64 %0, %1, %2;" : "=r" (r.s1) : "r" (x.s1), "r" (y.s1));
+// #else
+	r.s0 = x.s0 + y.s0;
+	r.s1 = x.s1 + (int_32)y.s1 + ((r.s0 < x.s0) ? 1 : 0);
+// #endif
+	return r;
+}
+
+INLINE big_type _big_add_u64(const big_type x, const uint_64 y)
+{
+	big_type t; t.s0 = y; t.s1 = 0;
+	return big_add(x, t);
+}
+
+INLINE big_type _big_add_s64(const big_type x, const int_64 y)
+{
+	big_type t; t.s0 = (uint_64)(y); t.s1 = (y < 0) ? -1 : 0;
+	return big_add(x, t);
+}
+
+INLINE big_type big_inc(const big_type x) { return _big_add_u64(x, 1); }
+INLINE big_type big_add_pck(const big_type x, const pck_type r) { return _big_add_u64(x, r); }
+INLINE big_type big_add_small(const big_type x, const small_type y) { return _big_add_s64(x, y); }
+INLINE big_type big_sub_small(const big_type x, const small_type y) { return _big_add_s64(x, -y); }
+
+INLINE big_type big_mul_u32(const big_type x, const uint_32 y)
+{
+	const big_type xp = (x.s1 < 0) ? big_neg(x) : x;
+	big_type r;
+	r.s0 = xp.s0 * y;
+	r.s1 = (int_32)((uint_32)(xp.s1) * y + mul_hi(xp.s0, (uint_64)(y)));
+	return (x.s1 < 0) ? big_neg(r) : r;
+}
+
+INLINE big_type _big_rshift(const big_type x, const int s)	// s != 0
+{
+	big_type r;
+	const int_64 s1 = x.s1;	// 64-bit shift
+	r.s0 = (x.s0 >> s) | (uint_64)(s1 << (64 - s));
+	r.s1 = (int_32)(s1 >> s);
+	return r;
+}
+
+INLINE big_type _big_mul_u64i32(const uint_64 x, const int_32 y)
+{
+	const uint_64 yp = abs(y);
+	const uint_64 l = (uint_32)(x) * (uint_64)(yp);
+	const uint_64 h = (uint_32)(x >> 32) * (uint_64)(yp) + (l >> 32);
+	big_type r;
+	r.s0 = (uint_32)(l) | (h << 32);
+	r.s1 = (int_32)(h >> 32);
+	return (y < 0) ? big_neg(r) : r;
+}
+
+INLINE big_type garner3(const ZP r0, const ZP r1, const ZP r2)
+{
+	// convert to mixed-radix representation, we must have P3 < P2 < P1 < P0
+	const uint_32 u2 = r2;
+	const uint_32 u1 = submulmod(r1, u2, INVP2_P1, PQ1);
+	const uint_32 u0 = submulmod(submulmod(r0, u2, INVP2_P0, PQ0), u1, INVP1_P0, PQ0);
+	const int_32 i0 = (u0 > P0 / 2) ? (int_32)(u0 - P0) : (int_32)(u0);
+
+	const uint_64 u12 = u2 + (uint_64)(P2) * u1;
+	return _big_add_u64(_big_mul_u64i32(P1 * (uint_64)(P2), i0), u12);
+}
+
+INLINE small_type getS_i(const RNS_S r) { return garner2(r.r[0], r.r[1]); }
+INLINE big_type getK_i(const RNS_K r) { return garner3(r.r[0], r.r[1], r.r[2]); }
+
+INLINE pck_type extract_r(big_type * const f)
+{
+	const pck_type r = (*f).s0 & (BASE2 - 1);
+	(*f) = _big_rshift((*f), 2 * LBASE);
+	return r;
+}
+
+INLINE RNS_K extract_encode(big_type * const f)
+{
+	const pck_type re = extract_r(f);
+	const uint_32 r1 = (uint_32)(re) & (BASE - 1);
+	int_32 r2 = (int_32)(re >> LBASE);
+	if (r2 >= (int_32)(BASE / 2)) { r2 -= (int_32)(BASE); (*f) = big_inc((*f)); }	// balanced
+	return addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));
+}
+
+INLINE RNS_K extract_encode_last(const big_type f)
+{
+	const uint_32 r1 = (uint_32)(f.s0) & (BASE - 1);
+	const int_32 r2 = (int_32)(f.s0 >> LBASE);
+	return addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));
+}
+
 #elif (PRM_COUNT == 4)	// PCK_FACTOR = 2
 
 #define BASE2		((uint_64)(1) << (2 * LBASE))
@@ -1209,29 +1324,6 @@ INLINE big_type big_neg(const big_type x)
 	return r;
 }
 
-INLINE big_type big_add_u64(const big_type x, const uint_64 y)
-{
-	big_type r;
-// #if defined(PTX_ASM)
-// 	asm volatile ("add.cc.u64 %0, %1, %2;" : "=r" (r.s0) : "r" (x.s0), "r" (y));
-// 	asm volatile ("addc.s64 %0, %1, 0;" : "=r" (r.s1) : "r" (x.s1));
-// #else
-	r.s0 = x.s0 + y;
-	r.s1 = x.s1 + ((r.s0 < x.s0) ? 1 : 0);
-// #endif
-	return r;
-}
-
-INLINE big_type big_add_s64(const big_type x, const int_64 y)
-{
-	big_type r;
-	r.s0 = x.s0 + (uint_64)(y);
-	r.s1 = x.s1 + ((y < 0) ? -1 : 0) + ((r.s0 < x.s0) ? 1 : 0);
-	return r;
-}
-
-INLINE big_type big_inc(const big_type x) { return big_add_u64(x, 1); }
-
 INLINE big_type big_add(const big_type x, const big_type y)
 {
 	big_type r;
@@ -1245,19 +1337,33 @@ INLINE big_type big_add(const big_type x, const big_type y)
 	return r;
 }
 
-INLINE big_type big_add_pck(const big_type x, const pck_type r) { return big_add_u64(x, r); }
-INLINE big_type big_add_small(const big_type x, const small_type y) { return big_add_s64(x, y); }
-INLINE big_type big_sub_small(const big_type x, const small_type y) { return big_add_s64(x, -y); }
+INLINE big_type _big_add_u64(const big_type x, const uint_64 y)
+{
+	big_type t; t.s0 = y; t.s1 = 0;
+	return big_add(x, t);
+}
+
+INLINE big_type _big_add_s64(const big_type x, const int_64 y)
+{
+	big_type t; t.s0 = (uint_64)(y); t.s1 = (y < 0) ? -1 : 0;
+	return big_add(x, t);
+}
+
+INLINE big_type big_inc(const big_type x) { return _big_add_u64(x, 1); }
+INLINE big_type big_add_pck(const big_type x, const pck_type r) { return _big_add_u64(x, r); }
+INLINE big_type big_add_small(const big_type x, const small_type y) { return _big_add_s64(x, y); }
+INLINE big_type big_sub_small(const big_type x, const small_type y) { return _big_add_s64(x, -y); }
 
 INLINE big_type big_mul_u32(const big_type x, const uint_32 y)
 {
+	const big_type xp = (x.s1 < 0) ? big_neg(x) : x;
 	big_type r;
-	r.s0 = x.s0 * y;
-	r.s1 = x.s1 * (int_64)(y) + (int_64)(mul_hi(x.s0, (uint_64)(y)));
-	return r;
+	r.s0 = xp.s0 * y;
+	r.s1 = (int_64)((uint_64)(xp.s1) * y + mul_hi(xp.s0, (uint_64)(y)));
+	return (x.s1 < 0) ? big_neg(r) : r;
 }
 
-INLINE big_type big_rshift(const big_type x, const int s)	// s != 0
+INLINE big_type _big_rshift(const big_type x, const int s)	// s != 0
 {
 	big_type r;
 	r.s0 = (x.s0 >> s) | (uint_64)(x.s1 << (64 - s));
@@ -1265,12 +1371,13 @@ INLINE big_type big_rshift(const big_type x, const int s)	// s != 0
 	return r;
 }
 
-INLINE big_type big_mul_u64i64(const uint_64 x, const int_64 y)
+INLINE big_type _big_mul_u64i64(const uint_64 x, const int_64 y)
 {
+	const uint_64 yp = abs(y);
 	big_type r;
-	r.s0 = x * (uint_64)(y);
-	r.s1 = (int_64)(mul_hi(x, (uint_64)(y)) - ((y < 0) ? x : 0));
-	return r;
+	r.s0 = x * yp;
+	r.s1 = (int_64)(mul_hi(x, yp));
+	return (y < 0) ? big_neg(r) : r;
 }
 
 INLINE big_type garner4(const ZP r0, const ZP r1, const ZP r2, const ZP r3)
@@ -1284,7 +1391,7 @@ INLINE big_type garner4(const ZP r0, const ZP r1, const ZP r2, const ZP r3)
 
 	const uint_64 u23 = u3 + (uint_64)(P3) * u2;
 	const int_64 i01 = (int_64)(u1) + (int_64)(P1) * i0;
-	return big_add_u64(big_mul_u64i64(P2 * (uint_64)(P3), i01), u23);
+	return _big_add_u64(_big_mul_u64i64(P2 * (uint_64)(P3), i01), u23);
 }
 
 INLINE small_type getS_i(const RNS_S r) { return garner2(r.r[0], r.r[1]); }
@@ -1293,7 +1400,7 @@ INLINE big_type getK_i(const RNS_K r) { return garner4(r.r[0], r.r[1], r.r[2], r
 INLINE pck_type extract_r(big_type * const f)
 {
 	const pck_type r = (*f).s0 & (BASE2 - 1);
-	(*f) = big_rshift((*f), 2 * LBASE);
+	(*f) = _big_rshift((*f), 2 * LBASE);
 	return r;
 }
 

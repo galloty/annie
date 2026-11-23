@@ -101,14 +101,15 @@ static const char * const src_ocl_kernel = \
 "	return lhs - rhs + ((lhs < rhs) ? p : 0);\n" \
 "}\n" \
 "\n" \
-"// 2 mul + 2 mul_hi\n" \
-"INLINE ZP mulmod(const ZP lhs, const ZP rhs, const ZP2 pq)	// TODO other formula => const\n" \
+"// Montgomery multiplication by a constant: 1 mul + 2 mul_hi\n" \
+"INLINE ZP mulmod_const(const ZP lhs, const ZP rhs, const ZP rhs_q, const uint_32 p)\n" \
 "{\n" \
-"	const uint_64 t = lhs * (uint_64)(rhs);\n" \
-"	const uint_32 lo = (uint_32)(t), hi = (uint_32)(t >> 32);\n" \
-"	const uint_32 mp = mul_hi(lo * pq.s1, pq.s0);\n" \
-"	return submod(hi, mp, pq.s0);\n" \
+"	const uint_32 mp = mul_hi(lhs * rhs_q, p);\n" \
+"	return submod(mul_hi(lhs, rhs), mp, p);\n" \
 "}\n" \
+"\n" \
+"// Montgomery multiplication: 2 mul + 2 mul_hi\n" \
+"INLINE ZP mulmod(const ZP lhs, const ZP rhs, const ZP2 pq) { return mulmod_const(lhs, rhs, rhs * pq.s1, pq.s0); }\n" \
 "\n" \
 "INLINE ZP submulmod(const ZP lhs, const ZP rhs, const ZP m, const ZP2 pq)\n" \
 "{\n" \
@@ -170,36 +171,48 @@ static const char * const src_ocl_kernel = \
 "	x1 = submod(x0, t, pq.s0); x0 = addmod(x0, t, pq.s0); \\\n" \
 "}\n" \
 "\n" \
+"#define FWD2_CONST(x0, x1, w, w_q) \\\n" \
+"{ \\\n" \
+"	const ZP t = mulmod_const(x1, w, w_q, pq.s0); \\\n" \
+"	x1 = submod(x0, t, pq.s0); x0 = addmod(x0, t, pq.s0); \\\n" \
+"}\n" \
+"\n" \
 "#define BCK2(x0, x1, w_i) \\\n" \
 "{ \\\n" \
 "	const ZP t = submod(x0, x1, pq.s0); x0 = addmod(x0, x1, pq.s0); \\\n" \
 "	x1 = mulmod(t, w_i, pq); \\\n" \
 "}\n" \
 "\n" \
-"#define SQR2(x0, x1, w) \\\n" \
+"#define BCK2_CONST(x0, x1, w_i, w_i_q) \\\n" \
 "{ \\\n" \
-"	const ZP t = mulmod(mulmod(x1, x1, pq), w, pq); \\\n" \
+"	const ZP t = submod(x0, x1, pq.s0); x0 = addmod(x0, x1, pq.s0); \\\n" \
+"	x1 = mulmod_const(t, w_i, w_i_q, pq.s0); \\\n" \
+"}\n" \
+"\n" \
+"#define SQR2(x0, x1, w, w_q) \\\n" \
+"{ \\\n" \
+"	const ZP t = mulmod_const(mulmod(x1, x1, pq), w, w_q, pq.s0); \\\n" \
 "	x1 = mulmod(addmod(x0, x0, pq.s0), x1, pq); \\\n" \
 "	x0 = addmod(mulmod(x0, x0, pq), t, pq.s0); \\\n" \
 "}\n" \
 "\n" \
-"#define SQR2N(x0, x1, w) \\\n" \
+"#define SQR2N(x0, x1, w, w_q) \\\n" \
 "{ \\\n" \
-"	const ZP t = mulmod(mulmod(x1, x1, pq), w, pq); \\\n" \
+"	const ZP t = mulmod_const(mulmod(x1, x1, pq), w, w_q, pq.s0); \\\n" \
 "	x1 = mulmod(addmod(x0, x0, pq.s0), x1, pq); \\\n" \
 "	x0 = submod(mulmod(x0, x0, pq), t, pq.s0); \\\n" \
 "}\n" \
 "\n" \
-"#define MUL2(x0, x1, xp0, xp1, w) \\\n" \
+"#define MUL2(x0, x1, xp0, xp1, w, w_q) \\\n" \
 "{ \\\n" \
-"	const ZP t = mulmod(mulmod(x1, xp1, pq), w, pq); \\\n" \
+"	const ZP t = mulmod_const(mulmod(x1, xp1, pq), w, w_q, pq.s0); \\\n" \
 "	x1 = addmod(mulmod(x0, xp1, pq), mulmod(xp0, x1, pq), pq.s0); \\\n" \
 "	x0 = addmod(mulmod(x0, xp0, pq), t, pq.s0); \\\n" \
 "}\n" \
 "\n" \
-"#define MUL2N(x0, x1, xp0, xp1, w) \\\n" \
+"#define MUL2N(x0, x1, xp0, xp1, w, w_q) \\\n" \
 "{ \\\n" \
-"	const ZP t = mulmod(mulmod(x1, xp1, pq), w, pq); \\\n" \
+"	const ZP t = mulmod_const(mulmod(x1, xp1, pq), w, w_q, pq.s0); \\\n" \
 "	x1 = addmod(mulmod(x0, xp1, pq), mulmod(xp0, x1, pq), pq.s0); \\\n" \
 "	x0 = submod(mulmod(x0, xp0, pq), t, pq.s0); \\\n" \
 "}\n" \
@@ -208,16 +221,28 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "INLINE void _forward8(const ZP2 pq, ZP x[8], const ZP w1, const ZP2 w2, const ZP4 w4)\n" \
 "{\n" \
-"	FWD2(x[0], x[4], w1); FWD2(x[1], x[5], w1); FWD2(x[2], x[6], w1); FWD2(x[3], x[7], w1);\n" \
-"	FWD2(x[0], x[2], w2.s0); FWD2(x[1], x[3], w2.s0); FWD2(x[4], x[6], w2.s1); FWD2(x[5], x[7], w2.s1);\n" \
-"	FWD2(x[0], x[1], w4.s0); FWD2(x[2], x[3], w4.s1); FWD2(x[4], x[5], w4.s2); FWD2(x[6], x[7], w4.s3);\n" \
+"	const ZP w1_q = w1 * pq.s1;\n" \
+"	FWD2_CONST(x[0], x[4], w1, w1_q); FWD2_CONST(x[1], x[5], w1, w1_q);\n" \
+"	FWD2_CONST(x[2], x[6], w1, w1_q); FWD2_CONST(x[3], x[7], w1, w1_q);\n" \
+"	const ZP w20_q = w2.s0 * pq.s1;\n" \
+"	FWD2_CONST(x[0], x[2], w2.s0, w20_q); FWD2_CONST(x[1], x[3], w2.s0, w20_q);\n" \
+"	const ZP w21_q = w2.s1 * pq.s1;\n" \
+"	FWD2_CONST(x[4], x[6], w2.s1, w21_q); FWD2_CONST(x[5], x[7], w2.s1, w21_q);\n" \
+"	FWD2(x[0], x[1], w4.s0); FWD2(x[2], x[3], w4.s1);\n" \
+"	FWD2(x[4], x[5], w4.s2); FWD2(x[6], x[7], w4.s3);\n" \
 "}\n" \
 "\n" \
 "INLINE void _backward8(const ZP2 pq, ZP x[8], const ZP w1_i, const ZP2 w2_i, const ZP4 w4_i)\n" \
 "{\n" \
-"	BCK2(x[0], x[1], w4_i.s0); BCK2(x[2], x[3], w4_i.s1); BCK2(x[4], x[5], w4_i.s2); BCK2(x[6], x[7], w4_i.s3);\n" \
-"	BCK2(x[0], x[2], w2_i.s0); BCK2(x[1], x[3], w2_i.s0); BCK2(x[4], x[6], w2_i.s1); BCK2(x[5], x[7], w2_i.s1);\n" \
-"	BCK2(x[0], x[4], w1_i); BCK2(x[1], x[5], w1_i); BCK2(x[2], x[6], w1_i); BCK2(x[3], x[7], w1_i);\n" \
+"	BCK2(x[0], x[1], w4_i.s0); BCK2(x[2], x[3], w4_i.s1);\n" \
+"	BCK2(x[4], x[5], w4_i.s2); BCK2(x[6], x[7], w4_i.s3);\n" \
+"	const ZP w20_i_q = w2_i.s0 * pq.s1;\n" \
+"	BCK2_CONST(x[0], x[2], w2_i.s0, w20_i_q); BCK2_CONST(x[1], x[3], w2_i.s0, w20_i_q);\n" \
+"	const ZP w21_i_q = w2_i.s1 * pq.s1;\n" \
+"	BCK2_CONST(x[4], x[6], w2_i.s1, w21_i_q); BCK2_CONST(x[5], x[7], w2_i.s1, w21_i_q);\n" \
+"	const ZP w1_i_q = w1_i * pq.s1;\n" \
+"	BCK2_CONST(x[0], x[4], w1_i, w1_i_q); BCK2_CONST(x[1], x[5], w1_i, w1_i_q);\n" \
+"	BCK2_CONST(x[2], x[6], w1_i, w1_i_q); BCK2_CONST(x[3], x[7], w1_i, w1_i_q);\n" \
 "}\n" \
 "\n" \
 "INLINE void _forward8_0(const ZP2 pq, ZP x[8], const ZP w1, const ZP2 w2, const ZP4 w4, const ZP rsq)\n" \
@@ -226,52 +251,74 @@ static const char * const src_ocl_kernel = \
 "	_forward8(pq, x, w1, w2, w4);\n" \
 "}\n" \
 "\n" \
-"INLINE void _square2x4(const ZP2 pq, ZP x[8], const ZP2 w2)\n" \
+"INLINE void _square2x4(const ZP2 pq, ZP x[8], const ZP2 w2, const ZP2 w2_q)\n" \
 "{\n" \
-"	SQR2(x[0], x[1], w2.s0); SQR2N(x[2], x[3], w2.s0); SQR2(x[4], x[5], w2.s1); SQR2N(x[6], x[7], w2.s1);\n" \
+"	SQR2(x[0], x[1], w2.s0, w2_q.s0); SQR2N(x[2], x[3], w2.s0, w2_q.s0);\n" \
+"	SQR2(x[4], x[5], w2.s1, w2_q.s1); SQR2N(x[6], x[7], w2.s1, w2_q.s1);\n" \
 "}\n" \
 "\n" \
 "INLINE void _square4x2(const ZP2 pq, ZP x[8], const ZP2 w2, const ZP2 w2_i)\n" \
 "{\n" \
-"	FWD2(x[0], x[2], w2.s0); FWD2(x[1], x[3], w2.s0); FWD2(x[4], x[6], w2.s1); FWD2(x[5], x[7], w2.s1);\n" \
-"	_square2x4(pq, x, w2);\n" \
-"	BCK2(x[0], x[2], w2_i.s0); BCK2(x[1], x[3], w2_i.s0); BCK2(x[4], x[6], w2_i.s1); BCK2(x[5], x[7], w2_i.s1);\n" \
+"	const ZP2 w2_q = w2 * pq.s1;\n" \
+"	FWD2_CONST(x[0], x[2], w2.s0, w2_q.s0); FWD2_CONST(x[1], x[3], w2.s0, w2_q.s0);\n" \
+"	FWD2_CONST(x[4], x[6], w2.s1, w2_q.s1); FWD2_CONST(x[5], x[7], w2.s1, w2_q.s1);\n" \
+"	_square2x4(pq, x, w2, w2_q);\n" \
+"	const ZP2 w2_i_q = w2_i * pq.s1;\n" \
+"	BCK2_CONST(x[0], x[2], w2_i.s0, w2_i_q.s0); BCK2_CONST(x[1], x[3], w2_i.s0, w2_i_q.s0);\n" \
+"	BCK2_CONST(x[4], x[6], w2_i.s1, w2_i_q.s1); BCK2_CONST(x[5], x[7], w2_i.s1, w2_i_q.s1);\n" \
 "}\n" \
 "\n" \
 "INLINE void _square8(const ZP2 pq, ZP x[8], const ZP w1, const ZP w1_i, const ZP2 w2, const ZP2 w2_i)\n" \
 "{\n" \
-"	FWD2(x[0], x[4], w1); FWD2(x[1], x[5], w1); FWD2(x[2], x[6], w1); FWD2(x[3], x[7], w1);\n" \
+"	const ZP w1_q = w1 * pq.s1;\n" \
+"	FWD2_CONST(x[0], x[4], w1, w1_q); FWD2_CONST(x[1], x[5], w1, w1_q);\n" \
+"	FWD2_CONST(x[2], x[6], w1, w1_q); FWD2_CONST(x[3], x[7], w1, w1_q);\n" \
 "	_square4x2(pq, x, w2, w2_i);\n" \
-"	BCK2(x[0], x[4], w1_i); BCK2(x[1], x[5], w1_i); BCK2(x[2], x[6], w1_i); BCK2(x[3], x[7], w1_i);\n" \
+"	const ZP w1_i_q = w1_i * pq.s1;\n" \
+"	BCK2_CONST(x[0], x[4], w1_i, w1_i_q); BCK2_CONST(x[1], x[5], w1_i, w1_i_q);\n" \
+"	BCK2_CONST(x[2], x[6], w1_i, w1_i_q); BCK2_CONST(x[3], x[7], w1_i, w1_i_q);\n" \
 "}\n" \
 "\n" \
-"INLINE void _mul2x4(const ZP2 pq, ZP x[8], const ZP xp[8], const ZP2 w2)\n" \
+"INLINE void _mul2x4(const ZP2 pq, ZP x[8], const ZP xp[8], const ZP2 w2, const ZP2 w2_q)\n" \
 "{\n" \
-"	MUL2(x[0], x[1], xp[0], xp[1], w2.s0); MUL2N(x[2], x[3], xp[2], xp[3], w2.s0); MUL2(x[4], x[5], xp[4], xp[5], w2.s1); MUL2N(x[6], x[7], xp[6], xp[7], w2.s1);\n" \
+"	MUL2(x[0], x[1], xp[0], xp[1], w2.s0, w2_q.s0); MUL2N(x[2], x[3], xp[2], xp[3], w2.s0, w2_q.s0);\n" \
+"	MUL2(x[4], x[5], xp[4], xp[5], w2.s1, w2_q.s1); MUL2N(x[6], x[7], xp[6], xp[7], w2.s1, w2_q.s1);\n" \
 "}\n" \
 "\n" \
 "INLINE void _mul4x2(const ZP2 pq, ZP x[8], const ZP xp[8], const ZP2 w2, const ZP2 w2_i)\n" \
 "{\n" \
-"	FWD2(x[0], x[2], w2.s0); FWD2(x[1], x[3], w2.s0); FWD2(x[4], x[6], w2.s1); FWD2(x[5], x[7], w2.s1);\n" \
-"	_mul2x4(pq, x, xp, w2);\n" \
-"	BCK2(x[0], x[2], w2_i.s0); BCK2(x[1], x[3], w2_i.s0); BCK2(x[4], x[6], w2_i.s1); BCK2(x[5], x[7], w2_i.s1);\n" \
+"	const ZP2 w2_q = w2 * pq.s1;\n" \
+"	FWD2_CONST(x[0], x[2], w2.s0, w2_q.s0); FWD2_CONST(x[1], x[3], w2.s0, w2_q.s0);\n" \
+"	FWD2_CONST(x[4], x[6], w2.s1, w2_q.s1); FWD2_CONST(x[5], x[7], w2.s1, w2_q.s1);\n" \
+"	_mul2x4(pq, x, xp, w2, w2_q);\n" \
+"	const ZP2 w2_i_q = w2_i * pq.s1;\n" \
+"	BCK2_CONST(x[0], x[2], w2_i.s0, w2_i_q.s0); BCK2_CONST(x[1], x[3], w2_i.s0, w2_i_q.s0);\n" \
+"	BCK2_CONST(x[4], x[6], w2_i.s1, w2_i_q.s1); BCK2_CONST(x[5], x[7], w2_i.s1, w2_i_q.s1);\n" \
 "}\n" \
 "\n" \
 "INLINE void _mul8(const ZP2 pq, ZP x[8], const ZP xp[8], const ZP w1, const ZP w1_i, const ZP2 w2, const ZP2 w2_i)\n" \
 "{\n" \
-"	FWD2(x[0], x[4], w1); FWD2(x[1], x[5], w1); FWD2(x[2], x[6], w1); FWD2(x[3], x[7], w1);\n" \
+"	const ZP w1_q = w1 * pq.s1;\n" \
+"	FWD2_CONST(x[0], x[4], w1, w1_q); FWD2_CONST(x[1], x[5], w1, w1_q);\n" \
+"	FWD2_CONST(x[2], x[6], w1, w1_q); FWD2_CONST(x[3], x[7], w1, w1_q);\n" \
 "	_mul4x2(pq, x, xp, w2, w2_i);\n" \
-"	BCK2(x[0], x[4], w1_i); BCK2(x[1], x[5], w1_i); BCK2(x[2], x[6], w1_i); BCK2(x[3], x[7], w1_i);\n" \
+"	const ZP w1_i_q = w1_i * pq.s1;\n" \
+"	BCK2_CONST(x[0], x[4], w1_i, w1_i_q); BCK2_CONST(x[1], x[5], w1_i, w1_i_q);\n" \
+"	BCK2_CONST(x[2], x[6], w1_i, w1_i_q); BCK2_CONST(x[3], x[7], w1_i, w1_i_q);\n" \
 "}\n" \
 "\n" \
 "INLINE void _fwd4x2(const ZP2 pq, ZP x[8], const ZP2 w2)\n" \
 "{\n" \
-"	FWD2(x[0], x[2], w2.s0); FWD2(x[1], x[3], w2.s0); FWD2(x[4], x[6], w2.s1); FWD2(x[5], x[7], w2.s1);\n" \
+"	const ZP2 w2_q = w2 * pq.s1;\n" \
+"	FWD2_CONST(x[0], x[2], w2.s0, w2_q.s0); FWD2_CONST(x[1], x[3], w2.s0, w2_q.s0);\n" \
+"	FWD2_CONST(x[4], x[6], w2.s1, w2_q.s1); FWD2_CONST(x[5], x[7], w2.s1, w2_q.s1);\n" \
 "}\n" \
 "\n" \
 "INLINE void _fwd8(const ZP2 pq, ZP x[8], const ZP w1, const ZP2 w2)\n" \
 "{\n" \
-"	FWD2(x[0], x[4], w1); FWD2(x[2], x[6], w1); FWD2(x[1], x[5], w1); FWD2(x[3], x[7], w1);\n" \
+"	const ZP w1_q = w1 * pq.s1;\n" \
+"	FWD2_CONST(x[0], x[4], w1, w1_q); FWD2_CONST(x[1], x[5], w1, w1_q);\n" \
+"	FWD2_CONST(x[2], x[6], w1, w1_q); FWD2_CONST(x[3], x[7], w1, w1_q);\n" \
 "	_fwd4x2(pq, x, w2);\n" \
 "}\n" \
 "\n" \
@@ -406,7 +453,7 @@ static const char * const src_ocl_kernel = \
 "{\n" \
 "	DECLARE_W2();\n" \
 "	LOADG(1);\n" \
-"	_square2x4(pq, xl, w2);\n" \
+"	_square2x4(pq, xl, w2, w2 * pq.s1);\n" \
 "	STOREG(1);\n" \
 "}\n" \
 "\n" \
@@ -415,7 +462,7 @@ static const char * const src_ocl_kernel = \
 "{\n" \
 "	DECLARE_W2();\n" \
 "	LOADL(1);\n" \
-"	_square2x4(pq, xl, w2);\n" \
+"	_square2x4(pq, xl, w2, w2 * pq.s1);\n" \
 "	STOREL(1);\n" \
 "}\n" \
 "\n" \
@@ -461,7 +508,7 @@ static const char * const src_ocl_kernel = \
 "	DECLARE_W2();\n" \
 "	LOADG(1);\n" \
 "	LOADPG(1);\n" \
-"	_mul2x4(pq, xl, xpl, w2);\n" \
+"	_mul2x4(pq, xl, xpl, w2, w2 * pq.s1);\n" \
 "	STOREG(1);\n" \
 "}\n" \
 "\n" \
@@ -471,7 +518,7 @@ static const char * const src_ocl_kernel = \
 "	DECLARE_W2();\n" \
 "	LOADL(1);\n" \
 "	LOADPG(1);\n" \
-"	_mul2x4(pq, xl, xpl, w2);\n" \
+"	_mul2x4(pq, xl, xpl, w2, w2 * pq.s1);\n" \
 "	STOREL(1);\n" \
 "}\n" \
 "\n" \
@@ -565,7 +612,7 @@ static const char * const src_ocl_kernel = \
 "// --- transform without local mem ---\n" \
 "\n" \
 "#if (LN_SZ >= 21)\n" \
-"__kernel\n" \
+"__kernel	// TODO ZP4\n" \
 "void forward8(__global ZP * restrict const regm, const uint_32 reg_x, const uint_32 reg_w, const int_32 lm, const uint_32 s)\n" \
 "{\n" \
 "	DECLARE_VAR_REG();\n" \
@@ -1102,6 +1149,12 @@ static const char * const src_ocl_kernel = \
 "#define NULL_PTR	((__global const ZP *)0)\n" \
 "\n" \
 "// Chinese remainder theorem\n" \
+"\n" \
+"INLINE int_32 garner1(const ZP r0)\n" \
+"{\n" \
+"	return get_i32(r0, P0);\n" \
+"}\n" \
+"\n" \
 "INLINE int_64 garner2(const ZP r0, const ZP r1)\n" \
 "{\n" \
 "	const uint_32 u1 = r1;\n" \
@@ -1111,25 +1164,181 @@ static const char * const src_ocl_kernel = \
 "	return (int_64)(u1) + (int_64)(P1) * i0;\n" \
 "}\n" \
 "\n" \
-"#if (PRM_COUNT == 4)\n" \
+"#if (PRM_COUNT == 2)	// PCK_FACTOR = 1\n" \
 "\n" \
-"// --- 128-bit arithmetic\n" \
+"typedef int_64 big_type;	// 64-bit, size = PRM_COUNT * 32 > LN + 2 * LBASE\n" \
+"typedef uint_32 pck_type;	// vector type of size PCK_FACTOR\n" \
+"typedef int_32 small_type;	// 32-bit, size = PCK_FACTOR * 32 > PCK_FACTOR * LBASE\n" \
 "\n" \
-"typedef struct { uint_64 s0; int_64 s1; } int_128;\n" \
+"INLINE big_type big_zero() { return 0; }\n" \
+"INLINE big_type big_neg(const big_type x) { return -x; }\n" \
+"INLINE big_type big_add(const big_type x, const big_type y) { return x + y; }\n" \
+"INLINE big_type big_inc(const big_type x) { return x + 1; }\n" \
+"INLINE big_type big_add_pck(const big_type x, const pck_type r) { return x + (big_type)(r); }\n" \
+"INLINE big_type big_add_small(const big_type x, const small_type y) { return x + y; }\n" \
+"INLINE big_type big_sub_small(const big_type x, const small_type y) { return x - y; }\n" \
+"INLINE big_type big_mul_u32(const big_type x, const uint_32 y) { return x * (big_type)(y); }\n" \
 "\n" \
-"INLINE int_128 int128_set(const uint_64 l, const int_64 h) { int_128 r; r.s0 = l; r.s1 = h; return r; }\n" \
+"INLINE small_type getS_i(const RNS_S r) { return garner1(r.r[0]); }\n" \
+"INLINE big_type getK_i(const RNS_K r) { return garner2(r.r[0], r.r[1]); }\n" \
 "\n" \
-"INLINE int_128 int128_neg(const int_128 x)\n" \
+"INLINE pck_type extract_r(big_type * const f)\n" \
 "{\n" \
-"	int_128 r;\n" \
+"	const pck_type r = (uint_32)(*f) & (BASE - 1);\n" \
+"	(*f) >>= LBASE;\n" \
+"	return r;\n" \
+"}\n" \
+"\n" \
+"INLINE RNS_K extract_encode(big_type * const f)\n" \
+"{\n" \
+"	const pck_type re = extract_r(f);\n" \
+"	int_32 ri = (int_32)(re);\n" \
+"	if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); (*f) = big_inc((*f)); }	// balanced\n" \
+"	return setK_i32(ri);\n" \
+"}\n" \
+"\n" \
+"INLINE RNS_K extract_encode_last(const big_type f)\n" \
+"{\n" \
+"	const int_32 r1 = (int_32)(f);\n" \
+"	return setK_i32(r1);\n" \
+"}\n" \
+"\n" \
+"#elif (PRM_COUNT == 3)	// PCK_FACTOR = 2\n" \
+"\n" \
+"#define BASE2		((uint_64)(1) << (2 * LBASE))\n" \
+"\n" \
+"typedef struct { uint_64 s0; int_32 s1; } big_type;	// 96-bit, size = PRM_COUNT * 32 > LN + 2 * LBASE\n" \
+"typedef uint_64 pck_type;	// vector type of size PCK_FACTOR\n" \
+"typedef int_64 small_type;	// 64-bit, size = PCK_FACTOR * 32 > PCK_FACTOR * LBASE\n" \
+"\n" \
+"INLINE big_type big_zero() { big_type r; r.s0 = 0; r.s1 = 0; return r; }\n" \
+"\n" \
+"INLINE big_type big_neg(const big_type x)\n" \
+"{\n" \
+"	big_type r;\n" \
 "	r.s0 = -x.s0;\n" \
 "	r.s1 = -x.s1 - ((x.s0 != 0) ? 1 : 0);\n" \
 "	return r;\n" \
 "}\n" \
 "\n" \
-"INLINE int_128 int128_add(const int_128 x, const int_128 y)\n" \
+"INLINE big_type big_add(const big_type x, const big_type y)\n" \
 "{\n" \
-"	int_128 r;\n" \
+"	big_type r;\n" \
+"// #if defined(PTX_ASM)\n" \
+"// 	asm volatile (\"add.cc.u64 %0, %1, %2;\" : \"=r\" (r.s0) : \"r\" (x.s0), \"r\" (y.s0));\n" \
+"// 	asm volatile (\"addc.s64 %0, %1, %2;\" : \"=r\" (r.s1) : \"r\" (x.s1), \"r\" (y.s1));\n" \
+"// #else\n" \
+"	r.s0 = x.s0 + y.s0;\n" \
+"	r.s1 = x.s1 + (int_32)y.s1 + ((r.s0 < x.s0) ? 1 : 0);\n" \
+"// #endif\n" \
+"	return r;\n" \
+"}\n" \
+"\n" \
+"INLINE big_type _big_add_u64(const big_type x, const uint_64 y)\n" \
+"{\n" \
+"	big_type t; t.s0 = y; t.s1 = 0;\n" \
+"	return big_add(x, t);\n" \
+"}\n" \
+"\n" \
+"INLINE big_type _big_add_s64(const big_type x, const int_64 y)\n" \
+"{\n" \
+"	big_type t; t.s0 = (uint_64)(y); t.s1 = (y < 0) ? -1 : 0;\n" \
+"	return big_add(x, t);\n" \
+"}\n" \
+"\n" \
+"INLINE big_type big_inc(const big_type x) { return _big_add_u64(x, 1); }\n" \
+"INLINE big_type big_add_pck(const big_type x, const pck_type r) { return _big_add_u64(x, r); }\n" \
+"INLINE big_type big_add_small(const big_type x, const small_type y) { return _big_add_s64(x, y); }\n" \
+"INLINE big_type big_sub_small(const big_type x, const small_type y) { return _big_add_s64(x, -y); }\n" \
+"\n" \
+"INLINE big_type big_mul_u32(const big_type x, const uint_32 y)\n" \
+"{\n" \
+"	const big_type xp = (x.s1 < 0) ? big_neg(x) : x;\n" \
+"	big_type r;\n" \
+"	r.s0 = xp.s0 * y;\n" \
+"	r.s1 = (int_32)((uint_32)(xp.s1) * y + mul_hi(xp.s0, (uint_64)(y)));\n" \
+"	return (x.s1 < 0) ? big_neg(r) : r;\n" \
+"}\n" \
+"\n" \
+"INLINE big_type _big_rshift(const big_type x, const int s)	// s != 0\n" \
+"{\n" \
+"	big_type r;\n" \
+"	const int_64 s1 = x.s1;	// 64-bit shift\n" \
+"	r.s0 = (x.s0 >> s) | (uint_64)(s1 << (64 - s));\n" \
+"	r.s1 = (int_32)(s1 >> s);\n" \
+"	return r;\n" \
+"}\n" \
+"\n" \
+"INLINE big_type _big_mul_u64i32(const uint_64 x, const int_32 y)\n" \
+"{\n" \
+"	const uint_64 yp = abs(y);\n" \
+"	const uint_64 l = (uint_32)(x) * (uint_64)(yp);\n" \
+"	const uint_64 h = (uint_32)(x >> 32) * (uint_64)(yp) + (l >> 32);\n" \
+"	big_type r;\n" \
+"	r.s0 = (uint_32)(l) | (h << 32);\n" \
+"	r.s1 = (int_32)(h >> 32);\n" \
+"	return (y < 0) ? big_neg(r) : r;\n" \
+"}\n" \
+"\n" \
+"INLINE big_type garner3(const ZP r0, const ZP r1, const ZP r2)\n" \
+"{\n" \
+"	// convert to mixed-radix representation, we must have P3 < P2 < P1 < P0\n" \
+"	const uint_32 u2 = r2;\n" \
+"	const uint_32 u1 = submulmod(r1, u2, INVP2_P1, PQ1);\n" \
+"	const uint_32 u0 = submulmod(submulmod(r0, u2, INVP2_P0, PQ0), u1, INVP1_P0, PQ0);\n" \
+"	const int_32 i0 = (u0 > P0 / 2) ? (int_32)(u0 - P0) : (int_32)(u0);\n" \
+"\n" \
+"	const uint_64 u12 = u2 + (uint_64)(P2) * u1;\n" \
+"	return _big_add_u64(_big_mul_u64i32(P1 * (uint_64)(P2), i0), u12);\n" \
+"}\n" \
+"\n" \
+"INLINE small_type getS_i(const RNS_S r) { return garner2(r.r[0], r.r[1]); }\n" \
+"INLINE big_type getK_i(const RNS_K r) { return garner3(r.r[0], r.r[1], r.r[2]); }\n" \
+"\n" \
+"INLINE pck_type extract_r(big_type * const f)\n" \
+"{\n" \
+"	const pck_type r = (*f).s0 & (BASE2 - 1);\n" \
+"	(*f) = _big_rshift((*f), 2 * LBASE);\n" \
+"	return r;\n" \
+"}\n" \
+"\n" \
+"INLINE RNS_K extract_encode(big_type * const f)\n" \
+"{\n" \
+"	const pck_type re = extract_r(f);\n" \
+"	const uint_32 r1 = (uint_32)(re) & (BASE - 1);\n" \
+"	int_32 r2 = (int_32)(re >> LBASE);\n" \
+"	if (r2 >= (int_32)(BASE / 2)) { r2 -= (int_32)(BASE); (*f) = big_inc((*f)); }	// balanced\n" \
+"	return addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));\n" \
+"}\n" \
+"\n" \
+"INLINE RNS_K extract_encode_last(const big_type f)\n" \
+"{\n" \
+"	const uint_32 r1 = (uint_32)(f.s0) & (BASE - 1);\n" \
+"	const int_32 r2 = (int_32)(f.s0 >> LBASE);\n" \
+"	return addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));\n" \
+"}\n" \
+"\n" \
+"#elif (PRM_COUNT == 4)	// PCK_FACTOR = 2\n" \
+"\n" \
+"#define BASE2		((uint_64)(1) << (2 * LBASE))\n" \
+"\n" \
+"typedef struct { uint_64 s0; int_64 s1; } big_type;	// 128-bit, size = PRM_COUNT * 32 > LN + 2 * LBASE\n" \
+"typedef uint_64 pck_type;	// vector type of size PCK_FACTOR\n" \
+"typedef int_64 small_type;	// 64-bit, size = PCK_FACTOR * 32 > PCK_FACTOR * LBASE\n" \
+"\n" \
+"INLINE big_type big_zero() { big_type r; r.s0 = 0; r.s1 = 0; return r; }\n" \
+"\n" \
+"INLINE big_type big_neg(const big_type x)\n" \
+"{\n" \
+"	big_type r;\n" \
+"	r.s0 = -x.s0;\n" \
+"	r.s1 = -x.s1 - ((x.s0 != 0) ? 1 : 0);\n" \
+"	return r;\n" \
+"}\n" \
+"\n" \
+"INLINE big_type big_add(const big_type x, const big_type y)\n" \
+"{\n" \
+"	big_type r;\n" \
 "// #if defined(PTX_ASM)\n" \
 "// 	asm volatile (\"add.cc.u64 %0, %1, %2;\" : \"=r\" (r.s0) : \"r\" (x.s0), \"r\" (y.s0));\n" \
 "// 	asm volatile (\"addc.s64 %0, %1, %2;\" : \"=r\" (r.s1) : \"r\" (x.s1), \"r\" (y.s1));\n" \
@@ -1140,60 +1349,50 @@ static const char * const src_ocl_kernel = \
 "	return r;\n" \
 "}\n" \
 "\n" \
-"INLINE int_128 int128_add_u64(const int_128 x, const uint_64 y)\n" \
+"INLINE big_type _big_add_u64(const big_type x, const uint_64 y)\n" \
 "{\n" \
-"	int_128 r;\n" \
-"// #if defined(PTX_ASM)\n" \
-"// 	asm volatile (\"add.cc.u64 %0, %1, %2;\" : \"=r\" (r.s0) : \"r\" (x.s0), \"r\" (y));\n" \
-"// 	asm volatile (\"addc.s64 %0, %1, 0;\" : \"=r\" (r.s1) : \"r\" (x.s1));\n" \
-"// #else\n" \
-"	r.s0 = x.s0 + y;\n" \
-"	r.s1 = x.s1 + ((r.s0 < x.s0) ? 1 : 0);\n" \
-"// #endif\n" \
-"	return r;\n" \
+"	big_type t; t.s0 = y; t.s1 = 0;\n" \
+"	return big_add(x, t);\n" \
 "}\n" \
 "\n" \
-"INLINE int_128 int128_add_i64(const int_128 x, const int_64 y)\n" \
+"INLINE big_type _big_add_s64(const big_type x, const int_64 y)\n" \
 "{\n" \
-"	int_128 r;\n" \
-"	r.s0 = x.s0 + (uint_64)(y);\n" \
-"	r.s1 = x.s1 + ((y < 0) ? -1 : 0) + ((r.s0 < x.s0) ? 1 : 0);\n" \
-"	return r;\n" \
+"	big_type t; t.s0 = (uint_64)(y); t.s1 = (y < 0) ? -1 : 0;\n" \
+"	return big_add(x, t);\n" \
 "}\n" \
 "\n" \
-"INLINE int_128 int128_sub_i64(const int_128 x, const int_64 y)\n" \
+"INLINE big_type big_inc(const big_type x) { return _big_add_u64(x, 1); }\n" \
+"INLINE big_type big_add_pck(const big_type x, const pck_type r) { return _big_add_u64(x, r); }\n" \
+"INLINE big_type big_add_small(const big_type x, const small_type y) { return _big_add_s64(x, y); }\n" \
+"INLINE big_type big_sub_small(const big_type x, const small_type y) { return _big_add_s64(x, -y); }\n" \
+"\n" \
+"INLINE big_type big_mul_u32(const big_type x, const uint_32 y)\n" \
 "{\n" \
-"	int_128 r;\n" \
-"	r.s0 = x.s0 - (uint_64)(y);\n" \
-"	r.s1 = x.s1 - ((y < 0) ? -1 : 0) - ((x.s0 < (uint_64)(y)) ? 1 : 0);\n" \
-"	return r;\n" \
+"	const big_type xp = (x.s1 < 0) ? big_neg(x) : x;\n" \
+"	big_type r;\n" \
+"	r.s0 = xp.s0 * y;\n" \
+"	r.s1 = (int_64)((uint_64)(xp.s1) * y + mul_hi(xp.s0, (uint_64)(y)));\n" \
+"	return (x.s1 < 0) ? big_neg(r) : r;\n" \
 "}\n" \
 "\n" \
-"INLINE int_128 int128_rshift(const int_128 x, const int s)	// s != 0\n" \
+"INLINE big_type _big_rshift(const big_type x, const int s)	// s != 0\n" \
 "{\n" \
-"	int_128 r;\n" \
+"	big_type r;\n" \
 "	r.s0 = (x.s0 >> s) | (uint_64)(x.s1 << (64 - s));\n" \
 "	r.s1 = x.s1 >> s;\n" \
 "	return r;\n" \
 "}\n" \
 "\n" \
-"INLINE int_128 int128_mul_u32(const int_128 x, const uint_32 y)\n" \
+"INLINE big_type _big_mul_u64i64(const uint_64 x, const int_64 y)\n" \
 "{\n" \
-"	int_128 r;\n" \
-"	r.s0 = x.s0 * y;\n" \
-"	r.s1 = x.s1 * (int_64)(y) + (int_64)(mul_hi(x.s0, (uint_64)(y)));\n" \
-"	return r;\n" \
+"	const uint_64 yp = abs(y);\n" \
+"	big_type r;\n" \
+"	r.s0 = x * yp;\n" \
+"	r.s1 = (int_64)(mul_hi(x, yp));\n" \
+"	return (y < 0) ? big_neg(r) : r;\n" \
 "}\n" \
 "\n" \
-"INLINE int_128 int128_mul_u64i64(const uint_64 x, const int_64 y)\n" \
-"{\n" \
-"	int_128 r;\n" \
-"	r.s0 = x * (uint_64)(y);\n" \
-"	r.s1 = (int_64)(mul_hi(x, (uint_64)(y)) - ((y < 0) ? x : 0));\n" \
-"	return r;\n" \
-"}\n" \
-"\n" \
-"INLINE int_128 garner4(const ZP r0, const ZP r1, const ZP r2, const ZP r3)\n" \
+"INLINE big_type garner4(const ZP r0, const ZP r1, const ZP r2, const ZP r3)\n" \
 "{\n" \
 "	// convert to mixed-radix representation, we must have P3 < P2 < P1 < P0\n" \
 "	const uint_32 u3 = r3;\n" \
@@ -1204,28 +1403,37 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "	const uint_64 u23 = u3 + (uint_64)(P3) * u2;\n" \
 "	const int_64 i01 = (int_64)(u1) + (int_64)(P1) * i0;\n" \
-"	return int128_add_u64(int128_mul_u64i64(P2 * (uint_64)(P3), i01), u23);\n" \
+"	return _big_add_u64(_big_mul_u64i64(P2 * (uint_64)(P3), i01), u23);\n" \
+"}\n" \
+"\n" \
+"INLINE small_type getS_i(const RNS_S r) { return garner2(r.r[0], r.r[1]); }\n" \
+"INLINE big_type getK_i(const RNS_K r) { return garner4(r.r[0], r.r[1], r.r[2], r.r[3]); }\n" \
+"\n" \
+"INLINE pck_type extract_r(big_type * const f)\n" \
+"{\n" \
+"	const pck_type r = (*f).s0 & (BASE2 - 1);\n" \
+"	(*f) = _big_rshift((*f), 2 * LBASE);\n" \
+"	return r;\n" \
+"}\n" \
+"\n" \
+"INLINE RNS_K extract_encode(big_type * const f)\n" \
+"{\n" \
+"	const pck_type re = extract_r(f);\n" \
+"	const uint_32 r1 = (uint_32)(re) & (BASE - 1);\n" \
+"	int_32 r2 = (int_32)(re >> LBASE);\n" \
+"	if (r2 >= (int_32)(BASE / 2)) { r2 -= (int_32)(BASE); (*f) = big_inc((*f)); }	// balanced\n" \
+"	return addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));\n" \
+"}\n" \
+"\n" \
+"INLINE RNS_K extract_encode_last(const big_type f)\n" \
+"{\n" \
+"	const uint_32 r1 = (uint_32)(f.s0) & (BASE - 1);\n" \
+"	const int_32 r2 = (int_32)(f.s0 >> LBASE);\n" \
+"	return addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));\n" \
 "}\n" \
 "\n" \
 "#endif\n" \
 "\n" \
-"#if (PRM_COUNT == 2)\n" \
-"\n" \
-"// TODO split PRM_COUNT & PCK_FACTOR\n" \
-"typedef int_64		big_type;	// size = PRM_COUNT * 32 bits > LN + 2 * LBASE\n" \
-"typedef uint_32		pck_type;	// vector type of size PCK_FACTOR\n" \
-"typedef int_32		small_type;	// size = PCK_FACTOR * 32 bits > PCK_FACTOR * LBASE\n" \
-"\n" \
-"INLINE big_type getK_i(const RNS_K r) { return garner2(r.r[0], r.r[1]); }\n" \
-"INLINE small_type getS_i(const RNS_S r) { return get_i32(r.r[0], P0); }\n" \
-"\n" \
-"INLINE pck_type extract_r(big_type * const f)\n" \
-"{\n" \
-"	const pck_type r = (uint_32)(*f) & (BASE - 1);\n" \
-"	(*f) >>= LBASE;\n" \
-"	return r;\n" \
-"}\n" \
-"\n" \
 "INLINE void carry_mul_sub_1(const __global ZP * restrict const xi, __global const ZP * restrict const yi,\n" \
 "	__global big_type * restrict const carry, __local big_type * const cl, pck_type r[CARRY_LENGTH], const sz_t id, const uint_32 a)\n" \
 "{\n" \
@@ -1233,12 +1441,12 @@ static const char * const src_ocl_kernel = \
 "	ZP4 x4[PRM_COUNT]; for (sz_t l = 0; l < PRM_COUNT; ++l) x4[l] = load4g(xi, l * Z_OFFSET / 4);\n" \
 "	RNS_K y[4]; for (sz_t l = 0; l < PRM_COUNT; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }\n" \
 "\n" \
-"	big_type f = 0;\n" \
+"	big_type f = big_zero();\n" \
 "	for (sz_t j = 0; j < CARRY_LENGTH; ++j)\n" \
 "	{\n" \
 "		// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF\n" \
-"		f += getK_i(mulmodK(y[j], NORM_K())) * a;\n" \
-"		if (yi != NULL_PTR) f -= get_i32(yi[j], P0);\n" \
+"		f = big_add(f, big_mul_u32(getK_i(mulmodK(y[j], NORM_K())), a));\n" \
+"		if (yi != NULL_PTR) f = big_sub_small(f, getS_i(loadRNS_S(&yi[j])));\n" \
 "		r[j] = extract_r(&f);\n" \
 "	}\n" \
 "\n" \
@@ -1249,108 +1457,16 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "INLINE void carry_2(__global ZP * restrict const xi, const __local big_type * const cl, const pck_type r[CARRY_LENGTH], const sz_t lid)\n" \
 "{\n" \
-"	big_type f = (lid != 0) ? cl[lid - 1] : 0;\n" \
+"	big_type f = (lid != 0) ? cl[lid - 1] : big_zero();\n" \
 "	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
 "	{\n" \
-"		f += r[j];\n" \
-"		int_32 ri = (int_32)extract_r(&f);\n" \
-"\n" \
-"		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f += 1; }	// balanced\n" \
-"\n" \
-"		storeRNS_K(&xi[j], setK_i32(ri));\n" \
-"	}\n" \
-"\n" \
-"	f += r[CARRY_LENGTH - 1];\n" \
-"	const int_32 r1 = (int_32)(f);\n" \
-"\n" \
-"	storeRNS_K(&xi[CARRY_LENGTH - 1], setK_i32(r1));\n" \
-"}\n" \
-"\n" \
-"INLINE void carry_3(__global ZP * restrict const xi, __global const big_type * restrict const carry, const int_32 is_nega, const sz_t id)\n" \
-"{\n" \
-"	// assert CARRY_LENGTH = 4\n" \
-"	const ZP4 x4 = load4g(xi, 0 * Z_OFFSET / 4);\n" \
-"	ZP y[4]; y[0] = x4.s0; y[1] = x4.s1; y[2] = x4.s2; y[3] = x4.s3;\n" \
-"\n" \
-"	big_type f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];\n" \
-"	if ((id == 0) && (is_nega != 0)) f = -f;\n" \
-"	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
-"	{\n" \
-"		f += get_i32(y[j], P0);\n" \
-"		int_32 ri = (int_32)extract_r(&f);\n" \
-"\n" \
-"		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f += 1; }	// balanced\n" \
-"\n" \
-"		storeRNS_K(&xi[j], setK_i32(ri));\n" \
-"	}\n" \
-"\n" \
-"	f += get_i32(y[CARRY_LENGTH - 1], P0);\n" \
-"	const int_32 r1 = (int_32)(f);\n" \
-"\n" \
-"	storeRNS_K(&xi[CARRY_LENGTH - 1], setK_i32(r1));\n" \
-"}\n" \
-"\n" \
-"#elif (PRM_COUNT == 4)\n" \
-"\n" \
-"typedef int_128		big_type;	// size = PRM_COUNT * 32 bits > LN + 2 * LBASE\n" \
-"typedef uint2_32	pck_type;	// vector type of size PCK_FACTOR\n" \
-"typedef int_64		small_type;	// size = PCK_FACTOR * 32 bits > PCK_FACTOR * LBASE\n" \
-"\n" \
-"INLINE big_type getK_i(const RNS_K r) { return garner4(r.r[0], r.r[1], r.r[2], r.r[3]); }\n" \
-"INLINE small_type getS_i(const RNS_S r) { return garner2(r.r[0], r.r[1]); }\n" \
-"\n" \
-"INLINE pck_type extract_r(big_type * const f)\n" \
-"{\n" \
-"	pck_type r;\n" \
-"	r.s0 = (uint_32)((*f).s0) & (BASE - 1);\n" \
-"	(*f) = int128_rshift((*f), LBASE);\n" \
-"	r.s1 = (uint_32)((*f).s0) & (BASE - 1);\n" \
-"	(*f) = int128_rshift((*f), LBASE);\n" \
-"	return r;\n" \
-"}\n" \
-"\n" \
-"INLINE void carry_mul_sub_1(const __global ZP * restrict const xi, __global const ZP * restrict const yi,\n" \
-"	__global big_type * restrict const carry, __local big_type * const cl, pck_type r[CARRY_LENGTH], const sz_t id, const uint_32 a)\n" \
-"{\n" \
-"	// assert CARRY_LENGTH = 4\n" \
-"	ZP4 x4[PRM_COUNT]; for (sz_t l = 0; l < PRM_COUNT; ++l) x4[l] = load4g(xi, l * Z_OFFSET / 4);\n" \
-"	RNS_K y[4]; for (sz_t l = 0; l < PRM_COUNT; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }\n" \
-"\n" \
-"	big_type f = int128_set(0u, 0);\n" \
-"	for (sz_t j = 0; j < CARRY_LENGTH; ++j)\n" \
-"	{\n" \
-"		// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF\n" \
-"		f = int128_add(f, int128_mul_u32(getK_i(mulmodK(y[j], NORM_K())), a));\n" \
-"		if (yi != NULL_PTR) f = int128_sub_i64(f, getS_i(loadRNS_S(&yi[j])));\n" \
-"		r[j] = extract_r(&f);\n" \
-"	}\n" \
-"\n" \
-"	const sz_t lid = id % CARRY_WG_SZ;\n" \
-"	cl[lid] = f;\n" \
-"	if (lid == CARRY_WG_SZ - 1) carry[id / CARRY_WG_SZ] = f;\n" \
-"}\n" \
-"\n" \
-"INLINE void carry_2(__global ZP * restrict const xi, const __local big_type * const cl, const pck_type r[CARRY_LENGTH], const sz_t lid)\n" \
-"{\n" \
-"	big_type f = (lid != 0) ? cl[lid - 1] : int128_set(0u, 0);\n" \
-"	for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
-"	{\n" \
-"		f = int128_add_u64(f, r[j].s0 | ((uint_64)(r[j].s1) << LBASE));\n" \
-"		const pck_type re = extract_r(&f);\n" \
-"\n" \
-"		int_32 ri = (int_32)(re.s1);\n" \
-"		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f = int128_add_u64(f, 1); }	// balanced\n" \
-"\n" \
-"		const RNS_K u = addmodK(setK_u32(re.s0), mulmodK(setK_i32(ri), RBASE_K()));\n" \
+"		f = big_add_pck(f, r[j]);\n" \
+"		const RNS_K u = extract_encode(&f);\n" \
 "		storeRNS_K(&xi[j], u);\n" \
 "	}\n" \
 "\n" \
-"	f = int128_add_u64(f, r[CARRY_LENGTH - 1].s0 | ((uint_64)(r[CARRY_LENGTH - 1].s1) << LBASE));\n" \
-"	const uint_32 r1 = (uint_32)(f.s0) & (BASE - 1);\n" \
-"	f = int128_rshift(f, LBASE);\n" \
-"	const int_32 r2 = (int_32)(f.s0);\n" \
-"\n" \
-"	const RNS_K u = addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));\n" \
+"	f = big_add_pck(f, r[CARRY_LENGTH - 1]);\n" \
+"	const RNS_K u = extract_encode_last(f);\n" \
 "	storeRNS_K(&xi[CARRY_LENGTH - 1], u);\n" \
 "}\n" \
 "\n" \
@@ -1361,29 +1477,18 @@ static const char * const src_ocl_kernel = \
 "	RNS_S y[4]; for (sz_t l = 0; l < PCK_FACTOR; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }\n" \
 "\n" \
 "	big_type f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];\n" \
-"	if ((id == 0) && (is_nega != 0)) f = int128_neg(f);\n" \
+"	if ((id == 0) && (is_nega != 0)) f = big_neg(f);\n" \
 "	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
 "	{\n" \
-"		f = int128_add_i64(f, getS_i(y[j]));\n" \
-"		const pck_type re = extract_r(&f);\n" \
-"\n" \
-"		int_32 ri = (int_32)(re.s1);\n" \
-"		if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); f = int128_add_u64(f, 1); }	// balanced\n" \
-"\n" \
-"		const RNS_K u = addmodK(setK_u32(re.s0), mulmodK(setK_i32(ri), RBASE_K()));\n" \
+"		f = big_add_small(f, getS_i(y[j]));\n" \
+"		const RNS_K u = extract_encode(&f);\n" \
 "		storeRNS_K(&xi[j], u);\n" \
 "	}\n" \
 "\n" \
-"	f = int128_add_i64(f, getS_i(y[CARRY_LENGTH - 1]));\n" \
-"	const uint_32 r1 = (uint_32)(f.s0) & (BASE - 1);\n" \
-"	f = int128_rshift(f, LBASE);\n" \
-"	const int_32 r2 = (int_32)(f.s0);\n" \
-"\n" \
-"	const RNS_K u = addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));\n" \
+"	f = big_add_small(f, getS_i(y[CARRY_LENGTH - 1]));\n" \
+"	const RNS_K u = extract_encode_last(f);\n" \
 "	storeRNS_K(&xi[CARRY_LENGTH - 1], u);\n" \
 "}\n" \
-"\n" \
-"#endif\n" \
 "\n" \
 "__kernel __attribute__((reqd_work_group_size(CARRY_WG_SZ, 1, 1)))\n" \
 "void carry_mul(__global ZP * restrict const reg, __global big_type * restrict const carry, const uint_32 reg_x, const uint_32 a)\n" \
