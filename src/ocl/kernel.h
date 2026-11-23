@@ -121,27 +121,27 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "typedef struct { ZP r[PRM_COUNT]; } RNS_K;\n" \
 "\n" \
-"INLINE RNS_K setK_u32(const uint_32 n) { RNS_K r; for (sz_t l = 0; l < PRM_COUNT; ++l) r.r[l] = n; return r; }\n" \
-"INLINE RNS_K setK_i32(const int_32 i) { RNS_K r; for (sz_t l = 0; l < PRM_COUNT; ++l) r.r[l] = set_i32(i, g_pq[l].s0); return r; }\n" \
+"INLINE RNS_K setK_u32(const uint_32 n) { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = n; return r; }\n" \
+"INLINE RNS_K setK_i32(const int_32 i) { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = set_i32(i, g_pq[k].s0); return r; }\n" \
 "\n" \
 "INLINE RNS_K addmodK(const RNS_K lhs, const RNS_K rhs)\n" \
 "{\n" \
-"	RNS_K r; for (sz_t l = 0; l < PRM_COUNT; ++l) r.r[l] = addmod(lhs.r[l], rhs.r[l], g_pq[l].s0); return r;\n" \
+"	RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = addmod(lhs.r[k], rhs.r[k], g_pq[k].s0); return r;\n" \
 "}\n" \
 "\n" \
 "INLINE RNS_K submodK(const RNS_K lhs, const RNS_K rhs)\n" \
 "{\n" \
-"	RNS_K r; for (sz_t l = 0; l < PRM_COUNT; ++l) r.r[l] = submod(lhs.r[l], rhs.r[l], g_pq[l].s0); return r;\n" \
+"	RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = submod(lhs.r[k], rhs.r[k], g_pq[k].s0); return r;\n" \
 "}\n" \
 "\n" \
 "INLINE RNS_K mulmodK(const RNS_K lhs, const RNS_K rhs)\n" \
 "{\n" \
-"	RNS_K r; for (sz_t l = 0; l < PRM_COUNT; ++l) r.r[l] = mulmod(lhs.r[l], rhs.r[l], g_pq[l]); return r;\n" \
+"	RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = mulmod(lhs.r[k], rhs.r[k], g_pq[k]); return r;\n" \
 "}\n" \
 "\n" \
-"INLINE RNS_K NORM_K() { RNS_K r; for (sz_t l = 0; l < PRM_COUNT; ++l) r.r[l] = g_norm[l]; return r; }\n" \
-"INLINE RNS_K RBASE_K() { RNS_K r; for (sz_t l = 0; l < PRM_COUNT; ++l) r.r[l] = g_base[l]; return r; }\n" \
-"INLINE RNS_K RBASE_S() { RNS_K r; for (sz_t l = 0; l < PRM_COUNT; ++l) r.r[l] = g_baseS[l]; return r; }\n" \
+"INLINE RNS_K NORM_K() { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = g_norm[k]; return r; }\n" \
+"INLINE RNS_K RBASE_K() { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = g_base[k]; return r; }\n" \
+"INLINE RNS_K RBASE_S() { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = g_baseS[k]; return r; }\n" \
 "\n" \
 "typedef struct { ZP r[PCK_FACTOR]; } RNS_S;\n" \
 "\n" \
@@ -157,11 +157,11 @@ static const char * const src_ocl_kernel = \
 "INLINE ZP2 load2g(__global const ZP * restrict const x, const sz_t j) { return ((__global const ZP2 *)x)[j]; }\n" \
 "INLINE ZP4 load4g(__global const ZP * restrict const x, const sz_t j) { return ((__global const ZP4 *)x)[j]; }\n" \
 "\n" \
-"INLINE RNS_K loadRNS_K(__global const ZP * restrict const x) { RNS_K r; for (sz_t l = 0; l < PRM_COUNT; ++l) r.r[l] = x[l * Z_OFFSET]; return r; }\n" \
-"INLINE void storeRNS_K(__global ZP * restrict const x, const RNS_K r) { for (sz_t l = 0; l < PRM_COUNT; ++l) x[l * Z_OFFSET] = r.r[l]; }\n" \
+"INLINE RNS_K loadRNS_K(__global const ZP * restrict const x) { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = x[k * Z_OFFSET]; return r; }\n" \
+"INLINE void storeRNS_K(__global ZP * restrict const x, const RNS_K r) { for (sz_t k = 0; k < PRM_COUNT; ++k) x[k * Z_OFFSET] = r.r[k]; }\n" \
 "\n" \
-"INLINE RNS_S loadRNS_S(__global const ZP * restrict const x) { RNS_S r; for (sz_t l = 0; l < PCK_FACTOR; ++l) r.r[l] = x[l * Z_OFFSET]; return r; }\n" \
-"INLINE void storeRNS_S(__global ZP * restrict const x, const RNS_S r) { for (sz_t l = 0; l < PCK_FACTOR; ++l) x[l * Z_OFFSET] = r.r[l]; }\n" \
+"INLINE RNS_S loadRNS_S(__global const ZP * restrict const x) { RNS_S r; for (sz_t k = 0; k < PCK_FACTOR; ++k) r.r[k] = x[k * Z_OFFSET]; return r; }\n" \
+"INLINE void storeRNS_S(__global ZP * restrict const x, const RNS_S r) { for (sz_t k = 0; k < PCK_FACTOR; ++k) x[k * Z_OFFSET] = r.r[k]; }\n" \
 "\n" \
 "// --- transform/macro ---\n" \
 "\n" \
@@ -1438,8 +1438,8 @@ static const char * const src_ocl_kernel = \
 "	__global big_type * restrict const carry, __local big_type * const cl, pck_type r[CARRY_LENGTH], const sz_t id, const uint_32 a)\n" \
 "{\n" \
 "	// assert CARRY_LENGTH = 4\n" \
-"	ZP4 x4[PRM_COUNT]; for (sz_t l = 0; l < PRM_COUNT; ++l) x4[l] = load4g(xi, l * Z_OFFSET / 4);\n" \
-"	RNS_K y[4]; for (sz_t l = 0; l < PRM_COUNT; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }\n" \
+"	ZP4 x4[PRM_COUNT]; for (sz_t k = 0; k < PRM_COUNT; ++k) x4[k] = load4g(xi, k * Z_OFFSET / 4);\n" \
+"	RNS_K y[4]; for (sz_t k = 0; k < PRM_COUNT; ++k) { y[0].r[k] = x4[k].s0; y[1].r[k] = x4[k].s1; y[2].r[k] = x4[k].s2; y[3].r[k] = x4[k].s3; }\n" \
 "\n" \
 "	big_type f = big_zero();\n" \
 "	for (sz_t j = 0; j < CARRY_LENGTH; ++j)\n" \
@@ -1570,7 +1570,7 @@ static const char * const src_ocl_kernel = \
 "	__global ZP4 * restrict const y = &reg[reg_y * N_SZ / 4];\n" \
 "	__global const ZP4 * restrict const x = &reg[reg_x * N_SZ / 4];\n" \
 "\n" \
-"	for (sz_t l = 0; l < 4; ++l) y[l * Z_OFFSET / 4 + id] = x[l * Z_OFFSET / 4 + id];\n" \
+"	for (sz_t k = 0; k < PRM_COUNT; ++k) y[k * Z_OFFSET / 4 + id] = x[k * Z_OFFSET / 4 + id];\n" \
 "}\n" \
 "\n" \
 "";
