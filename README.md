@@ -9,8 +9,9 @@ Search for any prime number
 
 **annie** is a an [OpenCL™](https://www.khronos.org/opencl/) application on GPU.
 
-It performs a fast probable primality test for any number using an [Euler test](https://en.wikipedia.org/wiki/Euler%E2%80%93Jacobi_pseudoprime).  
-*a* is chosen such that Euler's criterion yields -1: it is the condition of [Proth's theorem](https://en.wikipedia.org/wiki/Proth%27s_theorem).
+It performs a fast probable primality test for any number using a [Fermat test](https://en.wikipedia.org/wiki/Fermat_primality_test)
+or an [Euler test](https://en.wikipedia.org/wiki/Euler%E2%80%93Jacobi_pseudoprime).  
+In the latter case, *a* is chosen such that Euler's criterion yields -1: it is the condition of [Proth's theorem](https://en.wikipedia.org/wiki/Proth%27s_theorem).
 If the input is of the form *k*&nbsp;&middot;&nbsp;2<sup>*n*</sup>&nbsp;+&nbsp;1, where *k* is odd and *k*&nbsp;<&nbsp;2<sup>*n*</sup>, *annie* performs a primality test.  
 
 The input is a [Pari/GP](https://pari.math.u-bordeaux.fr/) math expression. For example: "208003!-1", "3267113#-1", "fibonacci(4740217)", "(sqrtnint(10^999999,1024)+407852)^1024+1".
