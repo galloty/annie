@@ -682,9 +682,9 @@ public:
 		for (size_t l = 1; l < prm_count; ++l) src << ", " << rbase.get_r(l) << "u";
 		src << " };" << std::endl;
 
-		RNS4 rbase_S = RNS4(1u << lbase); for (size_t l = 1; l < pck_factor; ++l) rbase_S *= rbase;
-		src << "__constant uint g_baseS[" << prm_count << "] = { " << rbase_S.get_r(0) << "u";
-		for (size_t l = 1; l < prm_count; ++l) src << ", " << rbase_S.get_r(l) << "u";
+		RNS4 rbase_pck = RNS4(1u << lbase); for (size_t l = 1; l < pck_factor; ++l) rbase_pck *= rbase;
+		src << "__constant uint g_base_pck[" << prm_count << "] = { " << rbase_pck.get_r(0) << "u";
+		for (size_t l = 1; l < prm_count; ++l) src << ", " << rbase_pck.get_r(l) << "u";
 		src << " };" << std::endl;
 
 		src << "#define INVP1_P0\t" << Mod::invert(Mod::toMonty(Mod::P[1], 0), 0) << "u" << std::endl;
@@ -837,7 +837,7 @@ inline transform * create_transformGPU(const mpz_t & N, const int32_t a, const s
 	}
 	std::cout << "K_min = " << K_min << ", K*n*ln = " << c_min << ", " << c_min / double(c_2) << std::endl;
 
-	const size_t prm_count = K_min, pck_factor = get_s(K_min);
+	const size_t prm_count = K_min, pck_factor = get_s(prm_count);
 
 	p_2a = double(Mod::P[0]) / 2 / a; for (size_t k = 1; k < prm_count; ++k) p_2a *= double(Mod::P[k]);
 	int ln = 0, lbase = 0; get_n_base(ln, lbase, pck_factor, log2_16aN, p_2a);

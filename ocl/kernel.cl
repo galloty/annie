@@ -35,7 +35,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define RSQ3			1703176688u
 __constant uint g_norm[4] = { 3670016001u, 3567255553u, 3449815041u, 3405774849u };
 __constant uint g_base[4] = { 3174786139u, 3997810352u, 1461973742u, 212897086u };
-__constant uint g_baseS[4] = { 3018288268u, 499726294u, 1168408158u, 999690664u };
+__constant uint g_base_pck[4] = { 3018288268u, 499726294u, 1168408158u, 999690664u };
 #define INVP1_P0		1797558821u
 #define INVP2_P0		3075822917u
 #define INVP2_P1		4076863457u
@@ -129,9 +129,7 @@ INLINE RNS_K mulmodK(const RNS_K lhs, const RNS_K rhs)
 
 INLINE RNS_K NORM_K() { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = g_norm[k]; return r; }
 INLINE RNS_K RBASE_K() { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = g_base[k]; return r; }
-INLINE RNS_K RBASE_S() { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = g_baseS[k]; return r; }
-
-typedef struct { ZP r[PCK_FACTOR]; } RNS_S;
+INLINE RNS_K RBASE_PCK_K() { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = g_base_pck[k]; return r; }
 
 typedef struct { ZP r[PCK_FACTOR]; } pck_type;
 
@@ -158,8 +156,6 @@ INLINE void loadRNS_K_pck4(pck_type y[4], __global const ZP * restrict const x)
 	ZP4 x4[PCK_FACTOR]; for (sz_t l = 0; l < PCK_FACTOR; ++l) x4[l] = load4g(x, l * Z_OFFSET / 4);
 	for (sz_t l = 0; l < PCK_FACTOR; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }
 }
-
-INLINE RNS_S loadRNS_S(__global const ZP * restrict const x) { RNS_S r; for (sz_t k = 0; k < PCK_FACTOR; ++k) r.r[k] = x[k * Z_OFFSET]; return r; }
 
 // --- transform/macro ---
 
@@ -1146,36 +1142,24 @@ void fwd2048(__global ZP * restrict const regm, const uint_32 reg_x, const uint_
 #define BASE		(1u << LBASE)
 #define NULL_PTR	((__global const ZP *)0)
 
-// Chinese remainder theorem
-
-INLINE int_32 _garner1(const ZP r0)
-{
-	return get_i32(r0, P0);
-}
-
-INLINE int_64 _garner2(const ZP r0, const ZP r1)
-{
-	const uint_32 u1 = r1;
-	const uint_32 u0 = submulmod(r0, u1, INVP1_P0, PQ0);	// P2 < P1
-	const int_32 i0 = (u0 > P0 / 2) ? (int_32)(u0 - P0) : (int_32)(u0);
-
-	return (int_64)(u1) + (int_64)(P1) * i0;
-}
-
-#if (PRM_COUNT == 2)	// PCK_FACTOR = 1
+#if (PRM_COUNT == 2)
 
 typedef struct { int_64 s0; } big_type;		// 64-bit, size = PRM_COUNT * 32 > LN + 2 * LBASE
-typedef int_32 small_type;	// 32-bit, size = PCK_FACTOR * 32 > PCK_FACTOR * LBASE
 
 INLINE big_type big_zero() { big_type r; r.s0 = 0; return r; }
 INLINE big_type big_neg(const big_type x) { big_type r; r.s0 = -x.s0; return r; }
 INLINE big_type big_add(const big_type x, const big_type y) { big_type r; r.s0 = x.s0 + y.s0; return r; }
 INLINE big_type big_sub(const big_type x, const big_type y) { big_type r; r.s0 = x.s0 - y.s0; return r; }
 INLINE big_type big_inc(const big_type x) { big_type r; r.s0 = x.s0 + 1; return r; }
-INLINE big_type big_add_pck(const big_type x, const pck_type y) { big_type r; r.s0 = x.s0 + (int_64)(y.r[0]); return r; }
-INLINE big_type big_add_small(const big_type x, const small_type y) { big_type r; r.s0 = x.s0 + y; return r; }
+INLINE big_type big_add_pck(const big_type x, const pck_type y) { big_type r; r.s0 = x.s0 + (int_64)(y.r[0]); return r; }	// PCK_FACTOR = 1
 INLINE big_type big_mul_u32(const big_type x, const uint_32 y) { big_type r; r.s0 = x.s0 * (int_64)(y); return r; }
 INLINE big_type big_rshift(const big_type x, const int s) { big_type r; r.s0 = x.s0 >> s; return r; }
+
+INLINE bool big_ge_pow_2_s(const big_type x, const int s)	// x >= 2^s
+{
+	if (x.s0 < 0) return false;
+	return ((x.s0 >> s) != 0);
+}
 
 INLINE big_type garner2(const ZP r0, const ZP r1)
 {
@@ -1187,7 +1171,6 @@ INLINE big_type garner2(const ZP r0, const ZP r1)
 	return r;
 }
 
-INLINE small_type getS_i(const RNS_S r) { return _garner1(r.r[0]); }
 INLINE big_type getK_i(const RNS_K r) { return garner2(r.r[0], r.r[1]); }
 
 #elif (PRM_COUNT == 3)	// PCK_FACTOR = 2
@@ -1195,7 +1178,6 @@ INLINE big_type getK_i(const RNS_K r) { return garner2(r.r[0], r.r[1]); }
 #define BASE2		((uint_64)(1) << (2 * LBASE))
 
 typedef struct { uint_64 s0; int_32 s1; } big_type;		// 96-bit, size = PRM_COUNT * 32 > LN + 2 * LBASE
-typedef int_64 small_type;	// 64-bit, size = PCK_FACTOR * 32 > PCK_FACTOR * LBASE
 
 INLINE big_type big_zero() { big_type r; r.s0 = 0; r.s1 = 0; return r; }
 
@@ -1234,15 +1216,8 @@ INLINE big_type _big_add_u64(const big_type x, const uint_64 y)
 	return big_add(x, t);
 }
 
-INLINE big_type _big_add_s64(const big_type x, const int_64 y)
-{
-	big_type t; t.s0 = (uint_64)(y); t.s1 = (y < 0) ? -1 : 0;
-	return big_add(x, t);
-}
-
 INLINE big_type big_inc(const big_type x) { return _big_add_u64(x, 1); }
 INLINE big_type big_add_pck(const big_type x, const pck_type y) { return _big_add_u64(x, y.r[0] | ((uint_64)(y.r[1]) << LBASE)); }
-INLINE big_type big_add_small(const big_type x, const small_type y) { return _big_add_s64(x, y); }
 
 INLINE big_type big_mul_u32(const big_type x, const uint_32 y)
 {
@@ -1253,13 +1228,20 @@ INLINE big_type big_mul_u32(const big_type x, const uint_32 y)
 	return (x.s1 < 0) ? big_neg(r) : r;
 }
 
-INLINE big_type _big_rshift(const big_type x, const int s)	// s != 0
+INLINE big_type big_rshift(const big_type x, const int s)	// s != 0
 {
 	big_type r;
 	const int_64 s1 = x.s1;	// 64-bit shift
 	r.s0 = (x.s0 >> s) | (uint_64)(s1 << (64 - s));
 	r.s1 = (int_32)(s1 >> s);
 	return r;
+}
+
+INLINE bool big_ge_pow_2_s(const big_type x, const int s)	// x >= 2^s
+{
+	if (x.s1 < 0) return false;
+	if (s < 64) return ((x.s1 == 0) && ((x.s0 >> s) != 0));
+	else return ((x.s1 >> (s - 64)) != 0);
 }
 
 INLINE big_type _big_mul_u64i32(const uint_64 x, const int_32 y)
@@ -1285,7 +1267,6 @@ INLINE big_type garner3(const ZP r0, const ZP r1, const ZP r2)
 	return _big_add_u64(_big_mul_u64i32(P1 * (uint_64)(P2), i0), u12);
 }
 
-INLINE small_type getS_i(const RNS_S r) { return _garner2(r.r[0], r.r[1]); }
 INLINE big_type getK_i(const RNS_K r) { return garner3(r.r[0], r.r[1], r.r[2]); }
 
 #elif (PRM_COUNT == 4)	// PCK_FACTOR = 2
@@ -1293,7 +1274,6 @@ INLINE big_type getK_i(const RNS_K r) { return garner3(r.r[0], r.r[1], r.r[2]); 
 #define BASE2		((uint_64)(1) << (2 * LBASE))
 
 typedef struct { uint_64 s0; int_64 s1; } big_type;		// 128-bit, size = PRM_COUNT * 32 > LN + 2 * LBASE
-typedef int_64 small_type;	// 64-bit, size = PCK_FACTOR * 32 > PCK_FACTOR * LBASE
 
 INLINE big_type big_zero() { big_type r; r.s0 = 0; r.s1 = 0; return r; }
 
@@ -1332,15 +1312,8 @@ INLINE big_type _big_add_u64(const big_type x, const uint_64 y)
 	return big_add(x, t);
 }
 
-INLINE big_type _big_add_s64(const big_type x, const int_64 y)
-{
-	big_type t; t.s0 = (uint_64)(y); t.s1 = (y < 0) ? -1 : 0;
-	return big_add(x, t);
-}
-
 INLINE big_type big_inc(const big_type x) { return _big_add_u64(x, 1); }
 INLINE big_type big_add_pck(const big_type x, const pck_type y) { return _big_add_u64(x, y.r[0] | ((uint_64)(y.r[1]) << LBASE)); }
-INLINE big_type big_add_small(const big_type x, const small_type y) { return _big_add_s64(x, y); }
 
 INLINE big_type big_mul_u32(const big_type x, const uint_32 y)
 {
@@ -1351,12 +1324,19 @@ INLINE big_type big_mul_u32(const big_type x, const uint_32 y)
 	return (x.s1 < 0) ? big_neg(r) : r;
 }
 
-INLINE big_type _big_rshift(const big_type x, const int s)	// s != 0
+INLINE big_type big_rshift(const big_type x, const int s)	// s != 0
 {
 	big_type r;
 	r.s0 = (x.s0 >> s) | (uint_64)(x.s1 << (64 - s));
 	r.s1 = x.s1 >> s;
 	return r;
+}
+
+INLINE bool big_ge_pow_2_s(const big_type x, const int s)	// x >= 2^s
+{
+	if (x.s1 < 0) return false;
+	if (s < 64) return ((x.s1 == 0) && ((x.s0 >> s) != 0));
+	else return ((x.s1 >> (s - 64)) != 0);
 }
 
 INLINE big_type _big_mul_u64i64(const uint_64 x, const int_64 y)
@@ -1382,7 +1362,6 @@ INLINE big_type garner4(const ZP r0, const ZP r1, const ZP r2, const ZP r3)
 	return _big_add_u64(_big_mul_u64i64(P2 * (uint_64)(P3), i01), u23);
 }
 
-INLINE small_type getS_i(const RNS_S r) { return _garner2(r.r[0], r.r[1]); }
 INLINE big_type getK_i(const RNS_K r) { return garner4(r.r[0], r.r[1], r.r[2], r.r[3]); }
 
 #endif
@@ -1416,7 +1395,7 @@ INLINE pck_type extract_shift(big_type * const f)
 {
 	const uint_64 r64 = (*f).s0 & (BASE2 - 1);
 	pck_type r; r.r[0] = (uint_32)(r64) & (BASE - 1); r.r[1] = (uint_32)(r64 >> LBASE);
-	(*f) = _big_rshift((*f), 2 * LBASE);
+	(*f) = big_rshift((*f), 2 * LBASE);
 	return r;
 }
 
@@ -1450,7 +1429,7 @@ INLINE void carry_mul_sub_1(const __global ZP * restrict const xi, __global cons
 	{
 		// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF
 		f = big_add(f, big_mul_u32(getK_i(mulmodK(y[j], NORM_K())), a));
-		if (yi != NULL_PTR) f = big_sub(f, getK_i(loadRNS_K(&yi[j])));	// TODO: K residues are not necessary here because yi[j] <= base^PCK_FACTOR
+		if (yi != NULL_PTR) f = big_sub(f, getK_i(loadRNS_K(&yi[j])));	// TODO: K residues are not necessary here because yi[j] <= BASE^PCK_FACTOR
 		r[j] = extract_shift(&f);
 	}
 
@@ -1534,15 +1513,14 @@ void carry_complete(__global ZP * restrict const reg, __global const big_type * 
 
 INLINE void lower(__global ZP * restrict const x, const int_32 l0)
 {
-	const small_type base = (small_type)(1) << (PCK_FACTOR * LBASE);
-	if (getS_i(loadRNS_S(&x[N_SZ - 1])) >= base)	// >= base^n	TODO getK_i
+	const RNS_K hi = loadRNS_K(&x[N_SZ - 1]);	// TODO: K residues are not necessary here because yi[j] <= BASE^PCK_FACTOR
+	if (big_ge_pow_2_s(getK_i(hi), PCK_FACTOR * LBASE))	// x >= base^n => x[N_SZ - 1] >= BASE^PCK_FACTOR
 	{
 		// - R or Q
-		const RNS_K hi = submodK(loadRNS_K(&x[N_SZ - 1]), RBASE_S());
-		storeRNS_K(&x[N_SZ - 1], hi);
+		storeRNS_K(&x[N_SZ - 1], submodK(hi, RBASE_PCK_K()));
 
-		const RNS_K lo = submodK(loadRNS_K(&x[0]), setK_i32(l0));
-		storeRNS_K(&x[0], lo);
+		const RNS_K lo = loadRNS_K(&x[0]);
+		storeRNS_K(&x[0], submodK(lo, setK_i32(l0)));
 	}
 }
 

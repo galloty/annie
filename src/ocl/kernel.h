@@ -47,7 +47,7 @@ static const char * const src_ocl_kernel = \
 "#define RSQ3			1703176688u\n" \
 "__constant uint g_norm[4] = { 3670016001u, 3567255553u, 3449815041u, 3405774849u };\n" \
 "__constant uint g_base[4] = { 3174786139u, 3997810352u, 1461973742u, 212897086u };\n" \
-"__constant uint g_baseS[4] = { 3018288268u, 499726294u, 1168408158u, 999690664u };\n" \
+"__constant uint g_base_pck[4] = { 3018288268u, 499726294u, 1168408158u, 999690664u };\n" \
 "#define INVP1_P0		1797558821u\n" \
 "#define INVP2_P0		3075822917u\n" \
 "#define INVP2_P1		4076863457u\n" \
@@ -141,9 +141,9 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "INLINE RNS_K NORM_K() { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = g_norm[k]; return r; }\n" \
 "INLINE RNS_K RBASE_K() { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = g_base[k]; return r; }\n" \
-"INLINE RNS_K RBASE_S() { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = g_baseS[k]; return r; }\n" \
+"INLINE RNS_K RBASE_PCK_K() { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = g_base_pck[k]; return r; }\n" \
 "\n" \
-"typedef struct { ZP r[PCK_FACTOR]; } RNS_S;\n" \
+"typedef struct { ZP r[PCK_FACTOR]; } pck_type;\n" \
 "\n" \
 "// --- I/O ---\n" \
 "\n" \
@@ -160,8 +160,14 @@ static const char * const src_ocl_kernel = \
 "INLINE RNS_K loadRNS_K(__global const ZP * restrict const x) { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = x[k * Z_OFFSET]; return r; }\n" \
 "INLINE void storeRNS_K(__global ZP * restrict const x, const RNS_K r) { for (sz_t k = 0; k < PRM_COUNT; ++k) x[k * Z_OFFSET] = r.r[k]; }\n" \
 "\n" \
-"INLINE RNS_S loadRNS_S(__global const ZP * restrict const x) { RNS_S r; for (sz_t k = 0; k < PCK_FACTOR; ++k) r.r[k] = x[k * Z_OFFSET]; return r; }\n" \
-"INLINE void storeRNS_S(__global ZP * restrict const x, const RNS_S r) { for (sz_t k = 0; k < PCK_FACTOR; ++k) x[k * Z_OFFSET] = r.r[k]; }\n" \
+"// INLINE pck_type loadRNS_K_pck(__global const ZP * restrict const x) { pck_type r; for (sz_t l = 0; l < PCK_FACTOR; ++l) r.r[l] = x[l * Z_OFFSET]; return r; }\n" \
+"INLINE void storeRNS_K_pck(__global ZP * restrict const x, const pck_type r) { for (sz_t l = 0; l < PCK_FACTOR; ++l) x[l * Z_OFFSET] = r.r[l]; }\n" \
+"\n" \
+"INLINE void loadRNS_K_pck4(pck_type y[4], __global const ZP * restrict const x)\n" \
+"{\n" \
+"	ZP4 x4[PCK_FACTOR]; for (sz_t l = 0; l < PCK_FACTOR; ++l) x4[l] = load4g(x, l * Z_OFFSET / 4);\n" \
+"	for (sz_t l = 0; l < PCK_FACTOR; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }\n" \
+"}\n" \
 "\n" \
 "// --- transform/macro ---\n" \
 "\n" \
@@ -1148,68 +1154,42 @@ static const char * const src_ocl_kernel = \
 "#define BASE		(1u << LBASE)\n" \
 "#define NULL_PTR	((__global const ZP *)0)\n" \
 "\n" \
-"// Chinese remainder theorem\n" \
+"#if (PRM_COUNT == 2)\n" \
 "\n" \
-"INLINE int_32 garner1(const ZP r0)\n" \
+"typedef struct { int_64 s0; } big_type;		// 64-bit, size = PRM_COUNT * 32 > LN + 2 * LBASE\n" \
+"\n" \
+"INLINE big_type big_zero() { big_type r; r.s0 = 0; return r; }\n" \
+"INLINE big_type big_neg(const big_type x) { big_type r; r.s0 = -x.s0; return r; }\n" \
+"INLINE big_type big_add(const big_type x, const big_type y) { big_type r; r.s0 = x.s0 + y.s0; return r; }\n" \
+"INLINE big_type big_sub(const big_type x, const big_type y) { big_type r; r.s0 = x.s0 - y.s0; return r; }\n" \
+"INLINE big_type big_inc(const big_type x) { big_type r; r.s0 = x.s0 + 1; return r; }\n" \
+"INLINE big_type big_add_pck(const big_type x, const pck_type y) { big_type r; r.s0 = x.s0 + (int_64)(y.r[0]); return r; }	// PCK_FACTOR = 1\n" \
+"INLINE big_type big_mul_u32(const big_type x, const uint_32 y) { big_type r; r.s0 = x.s0 * (int_64)(y); return r; }\n" \
+"INLINE big_type big_rshift(const big_type x, const int s) { big_type r; r.s0 = x.s0 >> s; return r; }\n" \
+"\n" \
+"INLINE bool big_ge_pow_2_s(const big_type x, const int s)	// x >= 2^s\n" \
 "{\n" \
-"	return get_i32(r0, P0);\n" \
+"	if (x.s0 < 0) return false;\n" \
+"	return ((x.s0 >> s) != 0);\n" \
 "}\n" \
 "\n" \
-"INLINE int_64 garner2(const ZP r0, const ZP r1)\n" \
+"INLINE big_type garner2(const ZP r0, const ZP r1)\n" \
 "{\n" \
 "	const uint_32 u1 = r1;\n" \
 "	const uint_32 u0 = submulmod(r0, u1, INVP1_P0, PQ0);	// P2 < P1\n" \
 "	const int_32 i0 = (u0 > P0 / 2) ? (int_32)(u0 - P0) : (int_32)(u0);\n" \
 "\n" \
-"	return (int_64)(u1) + (int_64)(P1) * i0;\n" \
-"}\n" \
-"\n" \
-"#if (PRM_COUNT == 2)	// PCK_FACTOR = 1\n" \
-"\n" \
-"typedef int_64 big_type;	// 64-bit, size = PRM_COUNT * 32 > LN + 2 * LBASE\n" \
-"typedef uint_32 pck_type;	// vector type of size PCK_FACTOR\n" \
-"typedef int_32 small_type;	// 32-bit, size = PCK_FACTOR * 32 > PCK_FACTOR * LBASE\n" \
-"\n" \
-"INLINE big_type big_zero() { return 0; }\n" \
-"INLINE big_type big_neg(const big_type x) { return -x; }\n" \
-"INLINE big_type big_add(const big_type x, const big_type y) { return x + y; }\n" \
-"INLINE big_type big_inc(const big_type x) { return x + 1; }\n" \
-"INLINE big_type big_add_pck(const big_type x, const pck_type r) { return x + (big_type)(r); }\n" \
-"INLINE big_type big_add_small(const big_type x, const small_type y) { return x + y; }\n" \
-"INLINE big_type big_sub_small(const big_type x, const small_type y) { return x - y; }\n" \
-"INLINE big_type big_mul_u32(const big_type x, const uint_32 y) { return x * (big_type)(y); }\n" \
-"\n" \
-"INLINE small_type getS_i(const RNS_S r) { return garner1(r.r[0]); }\n" \
-"INLINE big_type getK_i(const RNS_K r) { return garner2(r.r[0], r.r[1]); }\n" \
-"\n" \
-"INLINE pck_type extract_r(big_type * const f)\n" \
-"{\n" \
-"	const pck_type r = (uint_32)(*f) & (BASE - 1);\n" \
-"	(*f) >>= LBASE;\n" \
+"	big_type r; r.s0 = (int_64)(u1) + (int_64)(P1) * i0;\n" \
 "	return r;\n" \
 "}\n" \
 "\n" \
-"INLINE RNS_K extract_encode(big_type * const f)\n" \
-"{\n" \
-"	const pck_type re = extract_r(f);\n" \
-"	int_32 ri = (int_32)(re);\n" \
-"	if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); (*f) = big_inc((*f)); }	// balanced\n" \
-"	return setK_i32(ri);\n" \
-"}\n" \
-"\n" \
-"INLINE RNS_K extract_encode_last(const big_type f)\n" \
-"{\n" \
-"	const int_32 r1 = (int_32)(f);\n" \
-"	return setK_i32(r1);\n" \
-"}\n" \
+"INLINE big_type getK_i(const RNS_K r) { return garner2(r.r[0], r.r[1]); }\n" \
 "\n" \
 "#elif (PRM_COUNT == 3)	// PCK_FACTOR = 2\n" \
 "\n" \
 "#define BASE2		((uint_64)(1) << (2 * LBASE))\n" \
 "\n" \
-"typedef struct { uint_64 s0; int_32 s1; } big_type;	// 96-bit, size = PRM_COUNT * 32 > LN + 2 * LBASE\n" \
-"typedef uint_64 pck_type;	// vector type of size PCK_FACTOR\n" \
-"typedef int_64 small_type;	// 64-bit, size = PCK_FACTOR * 32 > PCK_FACTOR * LBASE\n" \
+"typedef struct { uint_64 s0; int_32 s1; } big_type;		// 96-bit, size = PRM_COUNT * 32 > LN + 2 * LBASE\n" \
 "\n" \
 "INLINE big_type big_zero() { big_type r; r.s0 = 0; r.s1 = 0; return r; }\n" \
 "\n" \
@@ -1229,8 +1209,16 @@ static const char * const src_ocl_kernel = \
 "// 	asm volatile (\"addc.s64 %0, %1, %2;\" : \"=r\" (r.s1) : \"r\" (x.s1), \"r\" (y.s1));\n" \
 "// #else\n" \
 "	r.s0 = x.s0 + y.s0;\n" \
-"	r.s1 = x.s1 + (int_32)y.s1 + ((r.s0 < x.s0) ? 1 : 0);\n" \
+"	r.s1 = x.s1 + y.s1 + ((r.s0 < x.s0) ? 1 : 0);\n" \
 "// #endif\n" \
+"	return r;\n" \
+"}\n" \
+"\n" \
+"INLINE big_type big_sub(const big_type x, const big_type y)\n" \
+"{\n" \
+"	big_type r;\n" \
+"	r.s0 = x.s0 - y.s0;\n" \
+"	r.s1 = x.s1 - y.s1 - ((r.s0 > x.s0) ? 1 : 0);\n" \
 "	return r;\n" \
 "}\n" \
 "\n" \
@@ -1240,16 +1228,8 @@ static const char * const src_ocl_kernel = \
 "	return big_add(x, t);\n" \
 "}\n" \
 "\n" \
-"INLINE big_type _big_add_s64(const big_type x, const int_64 y)\n" \
-"{\n" \
-"	big_type t; t.s0 = (uint_64)(y); t.s1 = (y < 0) ? -1 : 0;\n" \
-"	return big_add(x, t);\n" \
-"}\n" \
-"\n" \
 "INLINE big_type big_inc(const big_type x) { return _big_add_u64(x, 1); }\n" \
-"INLINE big_type big_add_pck(const big_type x, const pck_type r) { return _big_add_u64(x, r); }\n" \
-"INLINE big_type big_add_small(const big_type x, const small_type y) { return _big_add_s64(x, y); }\n" \
-"INLINE big_type big_sub_small(const big_type x, const small_type y) { return _big_add_s64(x, -y); }\n" \
+"INLINE big_type big_add_pck(const big_type x, const pck_type y) { return _big_add_u64(x, y.r[0] | ((uint_64)(y.r[1]) << LBASE)); }\n" \
 "\n" \
 "INLINE big_type big_mul_u32(const big_type x, const uint_32 y)\n" \
 "{\n" \
@@ -1260,13 +1240,20 @@ static const char * const src_ocl_kernel = \
 "	return (x.s1 < 0) ? big_neg(r) : r;\n" \
 "}\n" \
 "\n" \
-"INLINE big_type _big_rshift(const big_type x, const int s)	// s != 0\n" \
+"INLINE big_type big_rshift(const big_type x, const int s)	// s != 0\n" \
 "{\n" \
 "	big_type r;\n" \
 "	const int_64 s1 = x.s1;	// 64-bit shift\n" \
 "	r.s0 = (x.s0 >> s) | (uint_64)(s1 << (64 - s));\n" \
 "	r.s1 = (int_32)(s1 >> s);\n" \
 "	return r;\n" \
+"}\n" \
+"\n" \
+"INLINE bool big_ge_pow_2_s(const big_type x, const int s)	// x >= 2^s\n" \
+"{\n" \
+"	if (x.s1 < 0) return false;\n" \
+"	if (s < 64) return ((x.s1 == 0) && ((x.s0 >> s) != 0));\n" \
+"	else return ((x.s1 >> (s - 64)) != 0);\n" \
 "}\n" \
 "\n" \
 "INLINE big_type _big_mul_u64i32(const uint_64 x, const int_32 y)\n" \
@@ -1292,39 +1279,13 @@ static const char * const src_ocl_kernel = \
 "	return _big_add_u64(_big_mul_u64i32(P1 * (uint_64)(P2), i0), u12);\n" \
 "}\n" \
 "\n" \
-"INLINE small_type getS_i(const RNS_S r) { return garner2(r.r[0], r.r[1]); }\n" \
 "INLINE big_type getK_i(const RNS_K r) { return garner3(r.r[0], r.r[1], r.r[2]); }\n" \
-"\n" \
-"INLINE pck_type extract_r(big_type * const f)\n" \
-"{\n" \
-"	const pck_type r = (*f).s0 & (BASE2 - 1);\n" \
-"	(*f) = _big_rshift((*f), 2 * LBASE);\n" \
-"	return r;\n" \
-"}\n" \
-"\n" \
-"INLINE RNS_K extract_encode(big_type * const f)\n" \
-"{\n" \
-"	const pck_type re = extract_r(f);\n" \
-"	const uint_32 r1 = (uint_32)(re) & (BASE - 1);\n" \
-"	int_32 r2 = (int_32)(re >> LBASE);\n" \
-"	if (r2 >= (int_32)(BASE / 2)) { r2 -= (int_32)(BASE); (*f) = big_inc((*f)); }	// balanced\n" \
-"	return addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));\n" \
-"}\n" \
-"\n" \
-"INLINE RNS_K extract_encode_last(const big_type f)\n" \
-"{\n" \
-"	const uint_32 r1 = (uint_32)(f.s0) & (BASE - 1);\n" \
-"	const int_32 r2 = (int_32)(f.s0 >> LBASE);\n" \
-"	return addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));\n" \
-"}\n" \
 "\n" \
 "#elif (PRM_COUNT == 4)	// PCK_FACTOR = 2\n" \
 "\n" \
 "#define BASE2		((uint_64)(1) << (2 * LBASE))\n" \
 "\n" \
-"typedef struct { uint_64 s0; int_64 s1; } big_type;	// 128-bit, size = PRM_COUNT * 32 > LN + 2 * LBASE\n" \
-"typedef uint_64 pck_type;	// vector type of size PCK_FACTOR\n" \
-"typedef int_64 small_type;	// 64-bit, size = PCK_FACTOR * 32 > PCK_FACTOR * LBASE\n" \
+"typedef struct { uint_64 s0; int_64 s1; } big_type;		// 128-bit, size = PRM_COUNT * 32 > LN + 2 * LBASE\n" \
 "\n" \
 "INLINE big_type big_zero() { big_type r; r.s0 = 0; r.s1 = 0; return r; }\n" \
 "\n" \
@@ -1349,22 +1310,22 @@ static const char * const src_ocl_kernel = \
 "	return r;\n" \
 "}\n" \
 "\n" \
+"INLINE big_type big_sub(const big_type x, const big_type y)\n" \
+"{\n" \
+"	big_type r;\n" \
+"	r.s0 = x.s0 - y.s0;\n" \
+"	r.s1 = x.s1 - y.s1 - ((r.s0 > x.s0) ? 1 : 0);\n" \
+"	return r;\n" \
+"}\n" \
+"\n" \
 "INLINE big_type _big_add_u64(const big_type x, const uint_64 y)\n" \
 "{\n" \
 "	big_type t; t.s0 = y; t.s1 = 0;\n" \
 "	return big_add(x, t);\n" \
 "}\n" \
 "\n" \
-"INLINE big_type _big_add_s64(const big_type x, const int_64 y)\n" \
-"{\n" \
-"	big_type t; t.s0 = (uint_64)(y); t.s1 = (y < 0) ? -1 : 0;\n" \
-"	return big_add(x, t);\n" \
-"}\n" \
-"\n" \
 "INLINE big_type big_inc(const big_type x) { return _big_add_u64(x, 1); }\n" \
-"INLINE big_type big_add_pck(const big_type x, const pck_type r) { return _big_add_u64(x, r); }\n" \
-"INLINE big_type big_add_small(const big_type x, const small_type y) { return _big_add_s64(x, y); }\n" \
-"INLINE big_type big_sub_small(const big_type x, const small_type y) { return _big_add_s64(x, -y); }\n" \
+"INLINE big_type big_add_pck(const big_type x, const pck_type y) { return _big_add_u64(x, y.r[0] | ((uint_64)(y.r[1]) << LBASE)); }\n" \
 "\n" \
 "INLINE big_type big_mul_u32(const big_type x, const uint_32 y)\n" \
 "{\n" \
@@ -1375,12 +1336,19 @@ static const char * const src_ocl_kernel = \
 "	return (x.s1 < 0) ? big_neg(r) : r;\n" \
 "}\n" \
 "\n" \
-"INLINE big_type _big_rshift(const big_type x, const int s)	// s != 0\n" \
+"INLINE big_type big_rshift(const big_type x, const int s)	// s != 0\n" \
 "{\n" \
 "	big_type r;\n" \
 "	r.s0 = (x.s0 >> s) | (uint_64)(x.s1 << (64 - s));\n" \
 "	r.s1 = x.s1 >> s;\n" \
 "	return r;\n" \
+"}\n" \
+"\n" \
+"INLINE bool big_ge_pow_2_s(const big_type x, const int s)	// x >= 2^s\n" \
+"{\n" \
+"	if (x.s1 < 0) return false;\n" \
+"	if (s < 64) return ((x.s1 == 0) && ((x.s0 >> s) != 0));\n" \
+"	else return ((x.s1 >> (s - 64)) != 0);\n" \
 "}\n" \
 "\n" \
 "INLINE big_type _big_mul_u64i64(const uint_64 x, const int_64 y)\n" \
@@ -1406,30 +1374,57 @@ static const char * const src_ocl_kernel = \
 "	return _big_add_u64(_big_mul_u64i64(P2 * (uint_64)(P3), i01), u23);\n" \
 "}\n" \
 "\n" \
-"INLINE small_type getS_i(const RNS_S r) { return garner2(r.r[0], r.r[1]); }\n" \
 "INLINE big_type getK_i(const RNS_K r) { return garner4(r.r[0], r.r[1], r.r[2], r.r[3]); }\n" \
 "\n" \
-"INLINE pck_type extract_r(big_type * const f)\n" \
+"#endif\n" \
+"\n" \
+"#if (PCK_FACTOR == 1)\n" \
+"\n" \
+"INLINE pck_type extract_shift(big_type * const f)\n" \
 "{\n" \
-"	const pck_type r = (*f).s0 & (BASE2 - 1);\n" \
-"	(*f) = _big_rshift((*f), 2 * LBASE);\n" \
+"	pck_type r; r.r[0] = (uint_32)((*f).s0) & (BASE - 1);\n" \
+"	(*f) = big_rshift((*f), LBASE);\n" \
 "	return r;\n" \
 "}\n" \
 "\n" \
 "INLINE RNS_K extract_encode(big_type * const f)\n" \
 "{\n" \
-"	const pck_type re = extract_r(f);\n" \
-"	const uint_32 r1 = (uint_32)(re) & (BASE - 1);\n" \
-"	int_32 r2 = (int_32)(re >> LBASE);\n" \
-"	if (r2 >= (int_32)(BASE / 2)) { r2 -= (int_32)(BASE); (*f) = big_inc((*f)); }	// balanced\n" \
-"	return addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));\n" \
+"	const pck_type r = extract_shift(f);\n" \
+"	int_32 ri = (int_32)(r.r[0]);\n" \
+"	if (ri >= (int_32)(BASE / 2)) { ri -= (int_32)(BASE); (*f) = big_inc((*f)); }	// balanced\n" \
+"	return setK_i32(ri);\n" \
 "}\n" \
 "\n" \
 "INLINE RNS_K extract_encode_last(const big_type f)\n" \
 "{\n" \
-"	const uint_32 r1 = (uint_32)(f.s0) & (BASE - 1);\n" \
-"	const int_32 r2 = (int_32)(f.s0 >> LBASE);\n" \
-"	return addmodK(setK_u32(r1), mulmodK(setK_i32(r2), RBASE_K()));\n" \
+"	const int_32 r1 = (int_32)(f.s0);\n" \
+"	return setK_i32(r1);\n" \
+"}\n" \
+"\n" \
+"#elif (PCK_FACTOR == 2)\n" \
+"\n" \
+"INLINE pck_type extract_shift(big_type * const f)\n" \
+"{\n" \
+"	const uint_64 r64 = (*f).s0 & (BASE2 - 1);\n" \
+"	pck_type r; r.r[0] = (uint_32)(r64) & (BASE - 1); r.r[1] = (uint_32)(r64 >> LBASE);\n" \
+"	(*f) = big_rshift((*f), 2 * LBASE);\n" \
+"	return r;\n" \
+"}\n" \
+"\n" \
+"INLINE RNS_K extract_encode(big_type * const f)\n" \
+"{\n" \
+"	const pck_type r = extract_shift(f);\n" \
+"	int_32 r1 = (int_32)(r.r[1]);\n" \
+"	if (r1 >= (int_32)(BASE / 2)) { r1 -= (int_32)(BASE); (*f) = big_inc((*f)); }	// balanced\n" \
+"	return addmodK(setK_u32(r.r[0]), mulmodK(setK_i32(r1), RBASE_K()));\n" \
+"}\n" \
+"\n" \
+"INLINE RNS_K extract_encode_last(const big_type f)\n" \
+"{\n" \
+"	const uint_64 r64 = f.s0;\n" \
+"	pck_type r; r.r[0] = (uint_32)(r64) & (BASE - 1); r.r[1] = (uint_32)(r64 >> LBASE);\n" \
+"	const int_32 r1 = (int_32)(r.r[1]);\n" \
+"	return addmodK(setK_u32(r.r[0]), mulmodK(setK_i32(r1), RBASE_K()));\n" \
 "}\n" \
 "\n" \
 "#endif\n" \
@@ -1446,8 +1441,8 @@ static const char * const src_ocl_kernel = \
 "	{\n" \
 "		// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF\n" \
 "		f = big_add(f, big_mul_u32(getK_i(mulmodK(y[j], NORM_K())), a));\n" \
-"		if (yi != NULL_PTR) f = big_sub_small(f, getS_i(loadRNS_S(&yi[j])));\n" \
-"		r[j] = extract_r(&f);\n" \
+"		if (yi != NULL_PTR) f = big_sub(f, getK_i(loadRNS_K(&yi[j])));	// TODO: K residues are not necessary here because yi[j] <= BASE^PCK_FACTOR\n" \
+"		r[j] = extract_shift(&f);\n" \
 "	}\n" \
 "\n" \
 "	const sz_t lid = id % CARRY_WG_SZ;\n" \
@@ -1462,30 +1457,30 @@ static const char * const src_ocl_kernel = \
 "	{\n" \
 "		f = big_add_pck(f, r[j]);\n" \
 "		const RNS_K u = extract_encode(&f);\n" \
-"		storeRNS_K(&xi[j], u);\n" \
+"		if (lid > 0) storeRNS_K(&xi[j], u); else storeRNS_K_pck(&xi[j], r[j]);\n" \
 "	}\n" \
 "\n" \
 "	f = big_add_pck(f, r[CARRY_LENGTH - 1]);\n" \
 "	const RNS_K u = extract_encode_last(f);\n" \
 "	storeRNS_K(&xi[CARRY_LENGTH - 1], u);\n" \
+"	if (lid > 0) storeRNS_K(&xi[CARRY_LENGTH - 1], u); else storeRNS_K_pck(&xi[CARRY_LENGTH - 1], r[CARRY_LENGTH - 1]);\n" \
 "}\n" \
 "\n" \
 "INLINE void carry_3(__global ZP * restrict const xi, __global const big_type * restrict const carry, const int_32 is_nega, const sz_t id)\n" \
 "{\n" \
 "	// assert CARRY_LENGTH = 4\n" \
-"	ZP4 x4[PCK_FACTOR]; for (sz_t l = 0; l < PCK_FACTOR; ++l) x4[l] = load4g(xi, l * Z_OFFSET / 4);\n" \
-"	RNS_S y[4]; for (sz_t l = 0; l < PCK_FACTOR; ++l) { y[0].r[l] = x4[l].s0; y[1].r[l] = x4[l].s1; y[2].r[l] = x4[l].s2; y[3].r[l] = x4[l].s3; }\n" \
+"	pck_type y[4]; loadRNS_K_pck4(y, xi);\n" \
 "\n" \
 "	big_type f = carry[((id == 0) ? (N_SZ / CARRY_LENGTH / CARRY_WG_SZ) : id) - 1];\n" \
 "	if ((id == 0) && (is_nega != 0)) f = big_neg(f);\n" \
 "	for (sz_t j = 0; j < CARRY_LENGTH - 1; ++j)\n" \
 "	{\n" \
-"		f = big_add_small(f, getS_i(y[j]));\n" \
+"		f = big_add_pck(f, y[j]);\n" \
 "		const RNS_K u = extract_encode(&f);\n" \
 "		storeRNS_K(&xi[j], u);\n" \
 "	}\n" \
 "\n" \
-"	f = big_add_small(f, getS_i(y[CARRY_LENGTH - 1]));\n" \
+"	f = big_add_pck(f, y[CARRY_LENGTH - 1]);\n" \
 "	const RNS_K u = extract_encode_last(f);\n" \
 "	storeRNS_K(&xi[CARRY_LENGTH - 1], u);\n" \
 "}\n" \
@@ -1530,15 +1525,14 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "INLINE void lower(__global ZP * restrict const x, const int_32 l0)\n" \
 "{\n" \
-"	const small_type base = (small_type)(1) << (PCK_FACTOR * LBASE);\n" \
-"	if (getS_i(loadRNS_S(&x[N_SZ - 1])) >= base)	// >= base^n\n" \
+"	const RNS_K hi = loadRNS_K(&x[N_SZ - 1]);	// TODO: K residues are not necessary here because yi[j] <= BASE^PCK_FACTOR\n" \
+"	if (big_ge_pow_2_s(getK_i(hi), PCK_FACTOR * LBASE))	// x >= base^n => x[N_SZ - 1] >= BASE^PCK_FACTOR\n" \
 "	{\n" \
 "		// - R or Q\n" \
-"		const RNS_K hi = submodK(loadRNS_K(&x[N_SZ - 1]), RBASE_S());\n" \
-"		storeRNS_K(&x[N_SZ - 1], hi);\n" \
+"		storeRNS_K(&x[N_SZ - 1], submodK(hi, RBASE_PCK_K()));\n" \
 "\n" \
-"		const RNS_K lo = submodK(loadRNS_K(&x[0]), setK_i32(l0));\n" \
-"		storeRNS_K(&x[0], lo);\n" \
+"		const RNS_K lo = loadRNS_K(&x[0]);\n" \
+"		storeRNS_K(&x[0], submodK(lo, setK_i32(l0)));\n" \
 "	}\n" \
 "}\n" \
 "\n" \
