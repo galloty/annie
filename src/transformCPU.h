@@ -22,62 +22,128 @@ typedef int32_t		int_32;
 typedef uint64_t	uint_64;
 typedef int64_t		int_64;
 
-static uint_32 mul_hi(const uint_32 x, const uint_32 y) { return uint_32((x * uint_64(y)) >> 32); }
-static uint_64 mul_hi(const uint_64 x, const uint_64 y) { return uint_64((x * __int128_t(y)) >> 64); }
+inline uint_32 mul_hi(const uint_32 x, const uint_32 y) { return uint_32((x * uint_64(y)) >> 32); }
+inline uint_64 mul_hi(const uint_64 x, const uint_64 y) { return uint_64((x * __int128_t(y)) >> 64); }
+
+// carry-in and carry-out addition
+inline uint_64 _addcc(const uint_64 a, const uint_64 b, bool * const carry)
+{
+	const uint_64 t = a + b;
+	const bool c1 = (t < b);
+	const uint_64 c = t + ((*carry) ? 1 : 0);
+	const bool c2 = (c < (*carry));
+	(*carry) = c1 | c2;
+	return c;
+}
+
+// carry-in and carry-out subtraction
+inline uint_64 _subcc(const uint_64 a, const uint_64 b, bool * const carry)
+{
+	const uint_64 t = a - b;
+	const bool c1 = (a < b);
+	const uint_64 c = t - ((*carry)  ? 1 : 0);
+	const bool c2 = (t < (*carry));
+	(*carry) = c1 | c2;
+	return c;
+}
 
 // 128-bit arithmetic
 
-typedef struct { uint_64 s0; int_64 s1; } int_128;
+#define BIG_LSIZE	1
+#define HTYPE		int_64
 
-static int_128 int128_set(const uint_64 l, const int_64 h) { int_128 r; r.s0 = l; r.s1 = h; return r; }
+typedef struct { uint_64 l[1]; HTYPE h; } big_type;
 
-static int_128 int128_neg(const int_128 x) { int_128 r; r.s0 = -x.s0; r.s1 = -x.s1 - ((x.s0 != 0) ? 1 : 0); return r; }
+inline big_type big_zero() { big_type r; for (size_t i = 0; i < BIG_LSIZE; ++i) r.l[i] = 0; r.h = 0; return r; }
 
-static int_128 int128_add(const int_128 x, const int_128 y)
+inline big_type big_add(const big_type & x, const big_type & y)
 {
-	int_128 r;
-	r.s0 = x.s0 + y.s0;
-	r.s1 = x.s1 + y.s1 + ((r.s0 < x.s0) ? 1 : 0);
+	big_type r;
+	bool carry = false;
+	for (size_t i = 0; i < BIG_LSIZE; ++i) r.l[i] = _addcc(x.l[i], y.l[i], &carry);
+	r.h = x.h + y.h + (carry ? 1: 0);
 	return r;
 }
 
-static int_128 int128_add_u64(const int_128 x, const uint_64 y)
+inline big_type big_sub(const big_type & x, const big_type & y)
 {
-	int_128 r;
-	r.s0 = x.s0 + y;
-	r.s1 = x.s1 + ((r.s0 < x.s0) ? 1 : 0);
+	big_type r;
+	bool carry = false;
+	for (size_t i = 0; i < BIG_LSIZE; ++i) r.l[i] = _subcc(x.l[i], y.l[i], &carry);
+	r.h = x.h - y.h - (carry ? 1: 0);
 	return r;
 }
 
-static int_128 int128_sub_i64(const int_128 x, const int_64 y)
+inline big_type big_neg(const big_type & x) { return big_sub(big_zero(), x); }
+
+inline big_type _big_add_u64(const big_type & x, const uint_64 & y)
 {
-	int_128 r;
-	r.s0 = x.s0 - (uint_64)(y);
-	r.s1 = x.s1 - ((y < 0) ? -1 : 0) - ((x.s0 < (uint_64)(y)) ? 1 : 0);
+	big_type t; t.l[0] = y; for (size_t i = 1; i < BIG_LSIZE; ++i) t.l[i] = 0; t.h = 0;
+	return big_add(x, t);
+}
+
+inline big_type big_inc(const big_type x) { return _big_add_u64(x, 1); }
+
+inline big_type big_mul_u31(const big_type x, const uint_32 y)	// y < 2^31
+{
+	big_type r;
+	uint_32 carry = 0;
+	for (size_t i = 0; i < BIG_LSIZE; ++i)
+	{
+		const uint_32 xl = (uint_32)(x.l[i]), xh = (uint_32)(x.l[i] >> 32);
+		const uint_64 sl = xl * (uint_64)(y) + carry;
+		carry = (uint_32)(sl >> 32);
+		const uint_64 sh = xh * (uint_64)(y) + carry;
+		carry = (uint_32)(sh >> 32);
+		r.l[i] = (sh << 32) | (uint_32)(sl);
+	}
+	r.h = x.h * (HTYPE)(y) + (HTYPE)(carry);
 	return r;
 }
 
-static int_128 int128_rshift(const int_128 x, const int s)	// s != 0
+inline big_type big_mul_u32(const big_type x, const uint_32 y)	// TODO factor with big_mul_u31
 {
-	int_128 r;
-	r.s0 = (x.s0 >> s) | (uint_64)(x.s1 << (64 - s));
-	r.s1 = x.s1 >> s;
+	big_type r;
+	uint_32 carry = 0;
+	for (size_t i = 0; i < BIG_LSIZE; ++i)
+	{
+		const uint_32 xl = (uint_32)(x.l[i]), xh = (uint_32)(x.l[i] >> 32);
+		const uint_64 sl = xl * (uint_64)(y) + carry;
+		carry = (uint_32)(sl >> 32);
+		const uint_64 sh = xh * (uint_64)(y) + carry;
+		carry = (uint_32)(sh >> 32);
+		r.l[i] = (sh << 32) | (uint_32)(sl);
+	}
+	r.h = (HTYPE)(x.h * (int_64)(y) + carry);
 	return r;
 }
 
-static int_128 int128_mul_u32(const int_128 x, const uint_32 y)
+inline big_type big_rshift(const big_type x, const int s)	// s != 0
 {
-	int_128 r;
-	r.s0 = x.s0 * y;
-	r.s1 = x.s1 * (int_64)(y) + (int_64)(mul_hi(x.s0, (uint_64)(y)));
+	big_type r;
+	for (size_t i = 0; i < BIG_LSIZE - 1; ++i)
+	{
+		r.l[i] = (x.l[i] >> s) | (uint_64)(x.l[i + 1] << (64 - s));
+	}
+	const int_64 h = x.h;	// 64-bit shift
+	r.l[BIG_LSIZE - 1] = (x.l[BIG_LSIZE - 1] >> s) | (uint_64)(h << (64 - s));
+	r.h = (HTYPE)(h >> s);
 	return r;
 }
 
-static int_128 int128_mul_u64i64(const uint_64 x, const int_64 y)
+inline big_type _big_mul_u64i64(const uint_64 x, const int_64 y)
 {
-	int_128 r;
-	r.s0 = x * (uint_64)(y);
-	r.s1 = (int_64)(mul_hi(x, (uint_64)(y)) - ((y < 0) ? x : 0));
+	const uint_32 x0 = (uint_32)(x), x1 = (uint_32)(x >> 32);
+	const uint_32 y0 = (uint_32)(y); const int_32 y1 = (int_32)(y >> 32);
+
+	const uint_64 s00 = x0 * (uint_64)(y0);
+	const uint_64 s10 = x1 * (uint_64)(y0) + (uint_32)(s00 >> 32);
+	const int_64 s01 = x0 * (int_64)(y1) + (uint_32)(s10);
+	const int_64 s11 = x1 * (int_64)(y1) + (uint_32)(s10 >> 32) + (int_32)(s01 >> 32);
+
+	big_type r;
+	r.l[0] = (uint_64)(s01 << 32) | (uint_32)(s00);
+	r.h = s11;
 	return r;
 }
 
@@ -142,7 +208,7 @@ public:
 
 	uint_32 get() const { return _n; }
 
-	ZPT & set_i(const int_32 i) { _n = (uint_32)(i) + ((i < 0) ? _P : 0); return *this; }
+	ZPT & set_i32(const int_32 i) { _n = (uint_32)(i) + ((i < 0) ? _P : 0); return *this; }
 
 	// Conversion into / out of Montgomery form
 	ZPT toMonty() const { return ZPT(_mul(_n, _rsq)); }
@@ -166,105 +232,128 @@ public:
 	static ZPT norm(const int ln) { return ZPT(_P - ((_P - 1) >> ln)); }
 };
 
-using ZP1 = ZPT<(125u << 25) + 1, 3>;
-using ZP2 = ZPT<(243u << 24) + 1, 7>;
-using ZP3 = ZPT<(235u << 24) + 1, 3>;
-using ZP4 = ZPT<( 29u << 27) + 1, 3>;
+using ZP0 = ZPT<(125u << 25) + 1, 3>;
+using ZP1 = ZPT<(243u << 24) + 1, 7>;
+using ZP2 = ZPT<(235u << 24) + 1, 3>;
+using ZP3 = ZPT<( 29u << 27) + 1, 3>;
 
 // The residue number system {P1, P2}
-class RNS
+class RNS_K
 {
 private:
+	ZP0 _r0;
 	ZP1 _r1;
 	ZP2 _r2;
 	ZP3 _r3;
-	ZP4 _r4;
 
 private:
-	explicit RNS(const ZP1 & r1, const ZP2 & r2, const ZP3 & r3, const ZP4 & r4) : _r1(r1), _r2(r2), _r3(r3), _r4(r4) {}
+	explicit RNS_K(const ZP0 & r0, const ZP1 & r1, const ZP2 & r2, const ZP3 & r3) : _r0(r0), _r1(r1), _r2(r2), _r3(r3) {}
 
 	// Chinese remainder theorem
-
-	static int_64 garner2(const ZP1 & r1, const ZP2 & r2)
+	static big_type garner4(const ZP0 & r0, const ZP1 & r1, const ZP2 & r2, const ZP3 & r3)
 	{
-		static const uint_32 P1 = ZP1::P(), P2 = ZP2::P();
-		static const ZP1 INVP2_P1 = ZP1(P2).toMonty().invert();	// P2 < P1
-
-		// convert to mixed-radix representation
-		const uint_32 u2 = r2.get();
-		const uint_32 u1 = ((r1 - ZP1(u2)) * INVP2_P1).get();
-		const int_32 i1 = (u1 > P1 / 2) ? (int_32)(u1 - P1) : (int_32)(u1);
-
-		return (int_64)(u2) + (int_64)(P2) * i1;
-	}
-
-	static int_128 garner4(const ZP1 & r1, const ZP2 & r2, const ZP3 & r3, const ZP4 & r4)
-	{
-		static const uint_32 P1 = ZP1::P(), P2 = ZP2::P(), P3 = ZP3::P(), P4 = ZP4::P();
+		static const uint_32 P0 = ZP0::P(), P1 = ZP1::P(), P2 = ZP2::P(), P3 = ZP3::P();
 		// we must have P4 < P3 < P2 < P1
-		static const ZP3 INVP4_P3 = ZP3(P4).toMonty().invert();
-		static const ZP2 INVP4_P2 = ZP2(P4).toMonty().invert();
 		static const ZP2 INVP3_P2 = ZP2(P3).toMonty().invert();
-		static const ZP1 INVP4_P1 = ZP1(P4).toMonty().invert();
 		static const ZP1 INVP3_P1 = ZP1(P3).toMonty().invert();
 		static const ZP1 INVP2_P1 = ZP1(P2).toMonty().invert();
-		static const uint_64 P34 = P3 * (uint_64)(P4);
+		static const ZP0 INVP3_P0 = ZP0(P3).toMonty().invert();
+		static const ZP0 INVP2_P0 = ZP0(P2).toMonty().invert();
+		static const ZP0 INVP1_P0 = ZP0(P1).toMonty().invert();
+		static const uint_64 P34 = P2 * (uint_64)(P3);
 
 		// convert to mixed-radix representation
-		const uint_32 u4 = r4.get();
-		const uint_32 u3 = ((r3 - ZP3(u4)) * INVP4_P3).get();
-		const uint_32 u2 = (((r2 - ZP2(u4)) * INVP4_P2 - ZP2(u3)) * INVP3_P2).get();
-		const uint_32 u1 = ((((r1 - ZP1(u4)) * INVP4_P1 - ZP1(u3)) * INVP3_P1 - ZP1(u2)) * INVP2_P1).get();
-		const int_32 i1 = (u1 > P1 / 2) ? (int_32)(u1 - P1) : (int_32)(u1);
+		const uint_32 u3 = r3.get();
+		const uint_32 u2 = ((r2 - ZP2(u3)) * INVP3_P2).get();
+		const uint_32 u1 = (((r1 - ZP1(u3)) * INVP3_P1 - ZP1(u2)) * INVP2_P1).get();
+		const uint_32 u0 = ((((r0 - ZP0(u3)) * INVP3_P0 - ZP0(u2)) * INVP2_P0 - ZP0(u1)) * INVP1_P0).get();
+		const int_32 i0 = (u0 > P0 / 2) ? (int_32)(u0 - P0) : (int_32)(u0);
 
-		const uint_64 u34 = u4 + (uint_64)(P4) * u3;
-		const int_64 i12 = (int_64)(u2) + (int_64)(P2) * i1;
-		return int128_add_u64(int128_mul_u64i64(P34, i12), u34);
+		const uint_64 u34 = u3 + (uint_64)(P3) * u2;
+		const int_64 i12 = (int_64)(u1) + (int_64)(P1) * i0;
+		return _big_add_u64(_big_mul_u64i64(P34, i12), u34);
 	}
 
 public:
-	RNS() {}
-	explicit RNS(const uint_32 n) : _r1(n), _r2(n), _r3(n), _r4(n) {}
-	explicit RNS(const uint_32 n1, const uint_32 n2, const uint_32 n3, const uint_32 n4) : _r1(n1), _r2(n2), _r3(n3), _r4(n4) {}
+	RNS_K() {}
+	explicit RNS_K(const uint_32 n) : _r0(n), _r1(n), _r2(n), _r3(n) {}
+	explicit RNS_K(const uint_32 n0, const uint_32 n1, const uint_32 n2, const uint_32 n3) : _r0(n0), _r1(n1), _r2(n2), _r3(n3) {}
 
-	static RNS one() { return RNS(ZP1::one(), ZP2::one(), ZP3::one(), ZP4::one()); }
+	static RNS_K one() { return RNS_K(ZP0::one(), ZP1::one(), ZP2::one(), ZP3::one()); }
 
-	uint_32 get_r1() const { return _r1.get(); }
-	uint_32 get_r2() const { return _r2.get(); }
-	uint_32 get_r3() const { return _r3.get(); }
-	uint_32 get_r4() const { return _r4.get(); }
-
-	int_64 get_i64() const { return garner2(_r1, _r2); }
-	int_128 get_i128() const { return garner4(_r1, _r2, _r3, _r4); }
-
-	RNS & set_i(const int_32 i) { _r1.set_i(i); _r2.set_i(i); _r3.set_i(i); _r4.set_i(i); return *this; }
-
-	// Conversion into Montgomery form
-	RNS toMonty() const { return RNS(_r1.toMonty(), _r2.toMonty(), _r3.toMonty(), _r4.toMonty()); }
-
-	bool operator==(const RNS & rhs) const { return (_r1 == rhs._r1) && (_r2 == rhs._r2) && (_r3 == rhs._r3) && (_r4 == rhs._r4); }
-	bool operator!=(const RNS & rhs) const { return !(*this == rhs); }
-
-	RNS & operator+=(const RNS & rhs) { _r1 += rhs._r1; _r2 += rhs._r2; _r3 += rhs._r3; _r4 += rhs._r4; return *this; }
-	RNS & operator-=(const RNS & rhs) { _r1 -= rhs._r1; _r2 -= rhs._r2; _r3 -= rhs._r3; _r4 -= rhs._r4; return *this; }
-	RNS & operator*=(const RNS & rhs) { _r1 *= rhs._r1; _r2 *= rhs._r2; _r3 *= rhs._r3; _r4 *= rhs._r4; return *this; }
-
-	RNS operator+(const RNS & rhs) const { RNS r = *this; r += rhs; return r; }
-	RNS operator-(const RNS & rhs) const { RNS r = *this; r -= rhs; return r; }
-	RNS operator*(const RNS & rhs) const { RNS r = *this; r *= rhs; return r; }
-
-	RNS mul_Q() const { return RNS(_r1.mul_Q(), _r2.mul_Q(), _r3.mul_Q(), _r4.mul_Q()); }
-	RNS mul_const(const RNS & rhs, const RNS & rhs_Q) const
+	uint_32 get_r(const size_t i) const
 	{
-		return RNS(_r1.mul_const(rhs._r1, rhs_Q._r1), _r2.mul_const(rhs._r2, rhs_Q._r2),
-		           _r3.mul_const(rhs._r3, rhs_Q._r3), _r4.mul_const(rhs._r4, rhs_Q._r4));
+		if (i == 0) return _r0.get();
+		if (i == 1) return _r1.get();
+		if (i == 2) return _r2.get();
+		if (i == 3) return _r3.get();
+		return 0;
 	}
 
-	RNS invert() const { return RNS(_r1.invert(), _r2.invert(), _r3.invert(), _r4.invert()); }
-	static RNS primroot_n(const int ln) { return RNS(ZP1::primroot_n(ln), ZP2::primroot_n(ln), ZP3::primroot_n(ln), ZP4::primroot_n(ln)); }
-	static RNS norm(const int ln) { return RNS(ZP1::norm(ln), ZP2::norm(ln), ZP3::norm(ln), ZP4::norm(ln)); }
+	big_type getK_i() const { return garner4(_r0, _r1, _r2, _r3); }
+
+	RNS_K & set_i32(const int_32 i) { _r0.set_i32(i); _r1.set_i32(i); _r2.set_i32(i); _r3.set_i32(i); return *this; }
+
+	// Conversion into Montgomery form
+	RNS_K toMonty() const { return RNS_K(_r0.toMonty(), _r1.toMonty(), _r2.toMonty(), _r3.toMonty()); }
+
+	bool operator==(const RNS_K & rhs) const { return (_r0 == rhs._r0) && (_r1 == rhs._r1) && (_r2 == rhs._r2) && (_r3 == rhs._r3); }
+	bool operator!=(const RNS_K & rhs) const { return !(*this == rhs); }
+
+	RNS_K & operator+=(const RNS_K & rhs) { _r0 += rhs._r0; _r1 += rhs._r1; _r2 += rhs._r2; _r3 += rhs._r3; return *this; }
+	RNS_K & operator-=(const RNS_K & rhs) { _r0 -= rhs._r0; _r1 -= rhs._r1; _r2 -= rhs._r2; _r3 -= rhs._r3; return *this; }
+	RNS_K & operator*=(const RNS_K & rhs) { _r0 *= rhs._r0; _r1 *= rhs._r1; _r2 *= rhs._r2; _r3 *= rhs._r3; return *this; }
+
+	RNS_K operator+(const RNS_K & rhs) const { RNS_K r = *this; r += rhs; return r; }
+	RNS_K operator-(const RNS_K & rhs) const { RNS_K r = *this; r -= rhs; return r; }
+	RNS_K operator*(const RNS_K & rhs) const { RNS_K r = *this; r *= rhs; return r; }
+
+	RNS_K mul_Q() const { return RNS_K(_r0.mul_Q(), _r1.mul_Q(), _r2.mul_Q(), _r3.mul_Q()); }
+	RNS_K mul_const(const RNS_K & rhs, const RNS_K & rhs_Q) const
+	{
+		return RNS_K(_r0.mul_const(rhs._r0, rhs_Q._r0), _r1.mul_const(rhs._r1, rhs_Q._r1),
+		           _r2.mul_const(rhs._r2, rhs_Q._r2), _r3.mul_const(rhs._r3, rhs_Q._r3));
+	}
+
+	RNS_K invert() const { return RNS_K(_r0.invert(), _r1.invert(), _r2.invert(), _r3.invert()); }
+	static RNS_K primroot_n(const int ln) { return RNS_K(ZP0::primroot_n(ln), ZP1::primroot_n(ln), ZP2::primroot_n(ln), ZP3::primroot_n(ln)); }
+	static RNS_K norm(const int ln) { return RNS_K(ZP0::norm(ln), ZP1::norm(ln), ZP2::norm(ln), ZP3::norm(ln)); }
+
+	void encode(const uint32_t & rhs, const RNS_K & base) { *this *= base; *this += RNS_K(rhs); }
 
 	// void display() const { std::cout << "(" << _r1.get() << ", " << _r2.get() << ", " << _r3.get() << ", " << _r4.get() << ")"; }
+};
+
+class RNS_S
+{
+public:
+	typedef int_64 big_type;
+
+private:
+	ZP0 _r0;
+	ZP1 _r1;
+
+private:
+	// Chinese remainder theorem
+	static int_64 garner2(const ZP0 & r0, const ZP1 & r1)
+	{
+		static const uint_32 P0 = ZP0::P(), P1 = ZP1::P();
+		static const ZP0 INVP1_P0 = ZP0(P1).toMonty().invert();
+
+		// convert to mixed-radix representation
+		const uint_32 u1 = r1.get();
+		const uint_32 u0 = ((r0 - ZP0(u1)) * INVP1_P0).get();
+		const int_32 i0 = (u0 > P0 / 2) ? (int_32)(u0 - P0) : (int_32)(u0);
+
+		return (int_64)(u1) + (int_64)(P1) * i0;
+	}
+
+public:
+	RNS_S() {}
+	explicit RNS_S(const uint_32 n) : _r0(n), _r1(n) {}
+	explicit RNS_S(const uint_32 * const n) : _r0(n[0]), _r1(n[1]) {}
+
+	big_type getS_i() const { return garner2(_r0, _r1); }
 };
 
 class transformCPU : public transform
@@ -273,305 +362,306 @@ private:
 	static const size_t reg_count = 3;
 	int _ln = 0;
 	int _lbase = 0;
-	RNS _rbase, _rbase2;
+	size_t _prm_count, _pck_factor;
+	RNS_K _norm;
 	bool _init_failed = false;
-	RNS _norm;
 	mpz_t _Nz;
-	RNS * _N_Q = nullptr; RNS * _Ninv_R = nullptr; RNS * _one = nullptr;
-	RNS * _t_Q = nullptr; RNS * _t = nullptr;
-	RNS * _reg[reg_count];
-	RNS * _w_R; RNS * _wi_R; RNS * _w_Q; RNS * _wi_Q;
-	int_128 * _carry;
+	RNS_K * _N_Q = nullptr; RNS_K * _Ninv_R = nullptr; RNS_K * _one = nullptr;
+	RNS_K * _t_Q = nullptr; RNS_K * _t = nullptr;
+	RNS_K * _reg[reg_count];
+	RNS_K * _w_R; RNS_K * _wi_R; RNS_K * _w_Q; RNS_K * _wi_Q;
+	big_type * _carry;
+	uint_32 * _buf = nullptr;
 #if defined(CHECK_THEOREM)
 	double _logq_min = 1e100, _logq_max = -1e100, _logN = 0;
 #endif
 
 private:
-	static void _load(const size_t n, RNS * const xl, const RNS * const x, const size_t s) { for (size_t l = 0; l < n; ++l) xl[l] = x[l * s]; }
-	static void _store(const size_t n, RNS * const x, const size_t s, const RNS * const xl) { for (size_t l = 0; l < n; ++l) x[l * s] = xl[l]; }
+	static void _load(const size_t n, RNS_K * const xl, const RNS_K * const x, const size_t s) { for (size_t l = 0; l < n; ++l) xl[l] = x[l * s]; }
+	static void _store(const size_t n, RNS_K * const x, const size_t s, const RNS_K * const xl) { for (size_t l = 0; l < n; ++l) x[l * s] = xl[l]; }
 
-	static void FWD2(RNS & x0, RNS & x1, const RNS & w) { const RNS t = x1 * w; x1 = x0 - t; x0 = x0 + t; }
-	static void BCK2(RNS & x0, RNS & x1, const RNS & w_i) { const RNS t = x0 - x1; x0 = x0 + x1; x1 = t * w_i; }
+	static void FWD2(RNS_K & x0, RNS_K & x1, const RNS_K & w) { const RNS_K t = x1 * w; x1 = x0 - t; x0 = x0 + t; }
+	static void BCK2(RNS_K & x0, RNS_K & x1, const RNS_K & w_i) { const RNS_K t = x0 - x1; x0 = x0 + x1; x1 = t * w_i; }
 
-	static void FWD2_const(RNS & x0, RNS & x1, const RNS & w, const RNS w_Q)
+	static void FWD2_const(RNS_K & x0, RNS_K & x1, const RNS_K & w, const RNS_K w_Q)
 	{
-		const RNS t = x1.mul_const(w, w_Q); x1 = x0 - t; x0 = x0 + t;
+		const RNS_K t = x1.mul_const(w, w_Q); x1 = x0 - t; x0 = x0 + t;
 	}
-	static void BCK2_const(RNS & x0, RNS & x1, const RNS & w_i, const RNS & w_i_Q)
+	static void BCK2_const(RNS_K & x0, RNS_K & x1, const RNS_K & w_i, const RNS_K & w_i_Q)
 	{
-		const RNS t = x0 - x1; x0 = x0 + x1; x1 = t.mul_const(w_i, w_i_Q);
-	}
-
-	static void SQR2(RNS & x0, RNS & x1, const RNS & w, const RNS w_Q)
-	{
-		const RNS t = (x1 * x1).mul_const(w, w_Q); x1 = (x0 + x0) * x1; x0 = x0 * x0 + t;
-	}
-	static void SQR2N(RNS & x0, RNS & x1, const RNS & w, const RNS w_Q)
-	{
-		const RNS t = (x1 * x1).mul_const(w, w_Q); x1 = (x0 + x0) * x1; x0 = x0 * x0 - t;
+		const RNS_K t = x0 - x1; x0 = x0 + x1; x1 = t.mul_const(w_i, w_i_Q);
 	}
 
-	static void MUL2(RNS & x0, RNS & x1, const RNS & xp0, const RNS & xp1, const RNS & w, const RNS w_Q)
+	static void SQR2(RNS_K & x0, RNS_K & x1, const RNS_K & w, const RNS_K w_Q)
 	{
-		const RNS t = (x1 * xp1).mul_const(w, w_Q); x1 = x0 * xp1 + xp0 * x1; x0 = x0 * xp0 + t;
+		const RNS_K t = (x1 * x1).mul_const(w, w_Q); x1 = (x0 + x0) * x1; x0 = x0 * x0 + t;
 	}
-	static void MUL2N(RNS & x0, RNS & x1, const RNS & xp0, const RNS & xp1, const RNS & w, const RNS w_Q)
+	static void SQR2N(RNS_K & x0, RNS_K & x1, const RNS_K & w, const RNS_K w_Q)
 	{
-		const RNS t = (x1 * xp1).mul_const(w, w_Q); x1 = x0 * xp1 + xp0 * x1; x0 = x0 * xp0 - t;
+		const RNS_K t = (x1 * x1).mul_const(w, w_Q); x1 = (x0 + x0) * x1; x0 = x0 * x0 - t;
 	}
 
-	static void _forward8(RNS x[8], const RNS & w1, const RNS w2[2], const RNS w4[4])
+	static void MUL2(RNS_K & x0, RNS_K & x1, const RNS_K & xp0, const RNS_K & xp1, const RNS_K & w, const RNS_K w_Q)
 	{
-		const RNS w1_Q = w1.mul_Q();
+		const RNS_K t = (x1 * xp1).mul_const(w, w_Q); x1 = x0 * xp1 + xp0 * x1; x0 = x0 * xp0 + t;
+	}
+	static void MUL2N(RNS_K & x0, RNS_K & x1, const RNS_K & xp0, const RNS_K & xp1, const RNS_K & w, const RNS_K w_Q)
+	{
+		const RNS_K t = (x1 * xp1).mul_const(w, w_Q); x1 = x0 * xp1 + xp0 * x1; x0 = x0 * xp0 - t;
+	}
+
+	static void _forward8(RNS_K x[8], const RNS_K & w1, const RNS_K w2[2], const RNS_K w4[4])
+	{
+		const RNS_K w1_Q = w1.mul_Q();
 		FWD2_const(x[0], x[4], w1, w1_Q); FWD2_const(x[1], x[5], w1, w1_Q); FWD2_const(x[2], x[6], w1, w1_Q); FWD2_const(x[3], x[7], w1, w1_Q);
-		const RNS w20_Q = w2[0].mul_Q();
+		const RNS_K w20_Q = w2[0].mul_Q();
 		FWD2_const(x[0], x[2], w2[0], w20_Q); FWD2_const(x[1], x[3], w2[0], w20_Q);
-		const RNS w21_Q = w2[1].mul_Q();
+		const RNS_K w21_Q = w2[1].mul_Q();
 		FWD2_const(x[4], x[6], w2[1], w21_Q); FWD2_const(x[5], x[7], w2[1], w21_Q);
 		FWD2(x[0], x[1], w4[0]); FWD2(x[2], x[3], w4[1]); FWD2(x[4], x[5], w4[2]); FWD2(x[6], x[7], w4[3]);
 	}
 
-	static void _backward8(RNS x[8], const RNS w1_i, const RNS w2_i[2], const RNS w4_i[4])
+	static void _backward8(RNS_K x[8], const RNS_K w1_i, const RNS_K w2_i[2], const RNS_K w4_i[4])
 	{
 		BCK2(x[0], x[1], w4_i[0]); BCK2(x[2], x[3], w4_i[1]); BCK2(x[4], x[5], w4_i[2]); BCK2(x[6], x[7], w4_i[3]);
-		const RNS w20_i_Q = w2_i[0].mul_Q();
+		const RNS_K w20_i_Q = w2_i[0].mul_Q();
 		BCK2_const(x[0], x[2], w2_i[0], w20_i_Q); BCK2_const(x[1], x[3], w2_i[0], w20_i_Q);
-		const RNS w21_i_Q = w2_i[1].mul_Q();
+		const RNS_K w21_i_Q = w2_i[1].mul_Q();
 		BCK2_const(x[4], x[6], w2_i[1], w21_i_Q); BCK2_const(x[5], x[7], w2_i[1], w21_i_Q);
-		const RNS w1_i_Q = w1_i.mul_Q();
+		const RNS_K w1_i_Q = w1_i.mul_Q();
 		BCK2_const(x[0], x[4], w1_i, w1_i_Q); BCK2_const(x[1], x[5], w1_i, w1_i_Q); BCK2_const(x[2], x[6], w1_i, w1_i_Q); BCK2_const(x[3], x[7], w1_i, w1_i_Q);
 	}
 
-	static void _forward8_0(RNS x[8], const RNS & w1, const RNS w2[2], const RNS w4[4])
+	static void _forward8_0(RNS_K x[8], const RNS_K & w1, const RNS_K w2[2], const RNS_K w4[4])
 	{
 		for (size_t i = 0; i < 4; ++i) x[i] = x[i].toMonty();
 		_forward8(x, w1, w2, w4);
 	}
 
-	static void _square2x4(RNS x[8], const RNS w2[2], const RNS w2_Q[2])
+	static void _square2x4(RNS_K x[8], const RNS_K w2[2], const RNS_K w2_Q[2])
 	{
 		SQR2(x[0], x[1], w2[0], w2_Q[0]); SQR2N(x[2], x[3], w2[0], w2_Q[0]);
 		SQR2(x[4], x[5], w2[1], w2_Q[1]); SQR2N(x[6], x[7], w2[1], w2_Q[1]);
 	}
 
-	static void _square4x2(RNS x[8], const RNS w2[2], const RNS w2_i[2])
+	static void _square4x2(RNS_K x[8], const RNS_K w2[2], const RNS_K w2_i[2])
 	{
-		RNS w2_Q[2]; w2_Q[0] = w2[0].mul_Q(); w2_Q[1] = w2[1].mul_Q();
+		RNS_K w2_Q[2]; w2_Q[0] = w2[0].mul_Q(); w2_Q[1] = w2[1].mul_Q();
 		FWD2_const(x[0], x[2], w2[0], w2_Q[0]); FWD2_const(x[1], x[3], w2[0], w2_Q[0]);
 		FWD2_const(x[4], x[6], w2[1], w2_Q[1]); FWD2_const(x[5], x[7], w2[1], w2_Q[1]);
 		_square2x4(x, w2, w2_Q);
-		RNS w2_i_Q[2]; w2_i_Q[0] = w2_i[0].mul_Q(); w2_i_Q[1] = w2_i[1].mul_Q();
+		RNS_K w2_i_Q[2]; w2_i_Q[0] = w2_i[0].mul_Q(); w2_i_Q[1] = w2_i[1].mul_Q();
 		BCK2_const(x[0], x[2], w2_i[0], w2_i_Q[0]); BCK2_const(x[1], x[3], w2_i[0], w2_i_Q[0]);
 		BCK2_const(x[4], x[6], w2_i[1], w2_i_Q[1]); BCK2_const(x[5], x[7], w2_i[1], w2_i_Q[1]);
 	}
 
-	static void _square8(RNS x[8], const RNS & w1, const RNS & w1_i, const RNS w2[2], const RNS w2_i[2])
+	static void _square8(RNS_K x[8], const RNS_K & w1, const RNS_K & w1_i, const RNS_K w2[2], const RNS_K w2_i[2])
 	{
-		const RNS w1_Q = w1.mul_Q();
+		const RNS_K w1_Q = w1.mul_Q();
 		FWD2_const(x[0], x[4], w1, w1_Q); FWD2_const(x[1], x[5], w1, w1_Q); FWD2_const(x[2], x[6], w1, w1_Q); FWD2_const(x[3], x[7], w1, w1_Q);
 		_square4x2(x, w2, w2_i);
-		const RNS w1_i_Q = w1_i.mul_Q();
+		const RNS_K w1_i_Q = w1_i.mul_Q();
 		BCK2_const(x[0], x[4], w1_i, w1_i_Q); BCK2_const(x[1], x[5], w1_i, w1_i_Q); BCK2_const(x[2], x[6], w1_i, w1_i_Q); BCK2_const(x[3], x[7], w1_i, w1_i_Q);
 	}
 
-	static void _mul2x4(RNS x[8], const RNS xp[8], const RNS w2[2], const RNS w2_Q[2])
+	static void _mul2x4(RNS_K x[8], const RNS_K xp[8], const RNS_K w2[2], const RNS_K w2_Q[2])
 	{
 		MUL2(x[0], x[1], xp[0], xp[1], w2[0], w2_Q[0]); MUL2N(x[2], x[3], xp[2], xp[3], w2[0], w2_Q[0]);
 		MUL2(x[4], x[5], xp[4], xp[5], w2[1], w2_Q[1]); MUL2N(x[6], x[7], xp[6], xp[7], w2[1], w2_Q[1]);
 	}
 
-	static void _mul4x2(RNS x[8], const RNS xp[8], const RNS w2[2], const RNS w2_i[2])
+	static void _mul4x2(RNS_K x[8], const RNS_K xp[8], const RNS_K w2[2], const RNS_K w2_i[2])
 	{
-		RNS w2_Q[2]; w2_Q[0] = w2[0].mul_Q(); w2_Q[1] = w2[1].mul_Q();
+		RNS_K w2_Q[2]; w2_Q[0] = w2[0].mul_Q(); w2_Q[1] = w2[1].mul_Q();
 		FWD2_const(x[0], x[2], w2[0], w2_Q[0]); FWD2_const(x[1], x[3], w2[0], w2_Q[0]);
 		FWD2_const(x[4], x[6], w2[1], w2_Q[1]); FWD2_const(x[5], x[7], w2[1], w2_Q[1]);
 		_mul2x4(x, xp, w2, w2_Q);
-		RNS w2_i_Q[2]; w2_i_Q[0] = w2_i[0].mul_Q(); w2_i_Q[1] = w2_i[1].mul_Q();
+		RNS_K w2_i_Q[2]; w2_i_Q[0] = w2_i[0].mul_Q(); w2_i_Q[1] = w2_i[1].mul_Q();
 		BCK2_const(x[0], x[2], w2_i[0], w2_i_Q[0]); BCK2_const(x[1], x[3], w2_i[0], w2_i_Q[0]);
 		BCK2_const(x[4], x[6], w2_i[1], w2_i_Q[1]); BCK2_const(x[5], x[7], w2_i[1], w2_i_Q[1]);
 	}
 
-	static void _mul8(RNS x[8], const RNS xp[8], const RNS & w1, const RNS & w1_i, const RNS w2[2], const RNS w2_i[2])
+	static void _mul8(RNS_K x[8], const RNS_K xp[8], const RNS_K & w1, const RNS_K & w1_i, const RNS_K w2[2], const RNS_K w2_i[2])
 	{
-		const RNS w1_Q = w1.mul_Q();
+		const RNS_K w1_Q = w1.mul_Q();
 		FWD2_const(x[0], x[4], w1, w1_Q); FWD2_const(x[1], x[5], w1, w1_Q); FWD2_const(x[2], x[6], w1, w1_Q); FWD2_const(x[3], x[7], w1, w1_Q);
 		_mul4x2(x, xp, w2, w2_i);
-		const RNS w1_i_Q = w1_i.mul_Q();
+		const RNS_K w1_i_Q = w1_i.mul_Q();
 		BCK2_const(x[0], x[4], w1_i, w1_i_Q); BCK2_const(x[1], x[5], w1_i, w1_i_Q); BCK2_const(x[2], x[6], w1_i, w1_i_Q); BCK2_const(x[3], x[7], w1_i, w1_i_Q);
 	}
 
-	static void _fwd4x2(RNS x[8], const RNS w2[2])
+	static void _fwd4x2(RNS_K x[8], const RNS_K w2[2])
 	{
-		RNS w2_Q[2]; w2_Q[0] = w2[0].mul_Q(); w2_Q[1] = w2[1].mul_Q();
+		RNS_K w2_Q[2]; w2_Q[0] = w2[0].mul_Q(); w2_Q[1] = w2[1].mul_Q();
 		FWD2_const(x[0], x[2], w2[0], w2_Q[0]); FWD2_const(x[1], x[3], w2[0], w2_Q[0]);
 		FWD2_const(x[4], x[6], w2[1], w2_Q[1]); FWD2_const(x[5], x[7], w2[1], w2_Q[1]);
 	}
 
-	static void _fwd8(RNS x[8], const RNS & w1, const RNS w2[2])
+	static void _fwd8(RNS_K x[8], const RNS_K & w1, const RNS_K w2[2])
 	{
-		const RNS w1_Q = w1.mul_Q();
+		const RNS_K w1_Q = w1.mul_Q();
 		FWD2_const(x[0], x[4], w1, w1_Q); FWD2_const(x[1], x[5], w1, w1_Q); FWD2_const(x[2], x[6], w1, w1_Q); FWD2_const(x[3], x[7], w1, w1_Q);
 		_fwd4x2(x, w2);
 	}
 
 private:
-	static void forward8(RNS * const x, const RNS * const w, const size_t m, const size_t s)
+	static void forward8(RNS_K * const x, const RNS_K * const w, const size_t m, const size_t s)
 	{
 		for (size_t j = 0; j < s; ++j)
 		{
-			const RNS w1 = w[1 * (s + j)];
-			RNS w2[2]; _load(2, w2, &w[2 * (s + j)], 1);
-			RNS w4[4]; _load(4, w4, &w[4 * (s + j)], 1);
+			const RNS_K w1 = w[1 * (s + j)];
+			RNS_K w2[2]; _load(2, w2, &w[2 * (s + j)], 1);
+			RNS_K w4[4]; _load(4, w4, &w[4 * (s + j)], 1);
 
 			for (size_t i = 0; i < m; ++i)
 			{
 				const size_t k = 8 * m * j + i;
-				RNS zl[8]; _load(8, zl, &x[k], m);
+				RNS_K zl[8]; _load(8, zl, &x[k], m);
 				_forward8(zl, w1, w2, w4);
 				_store(8, &x[k], m, zl);
 			}
 		}
 	}
 
-	static void backward8(RNS * const z, const RNS * const w_i, const size_t m, const size_t s)
+	static void backward8(RNS_K * const z, const RNS_K * const w_i, const size_t m, const size_t s)
 	{
 		for (size_t j = 0; j < s; ++j)
 		{
-			const RNS w1_i = w_i[1 * (s + j)];
-			RNS w2_i[2]; _load(2, w2_i, &w_i[2 * (s + j)], 1);
-			RNS w4_i[4]; _load(4, w4_i, &w_i[4 * (s + j)], 1);
+			const RNS_K w1_i = w_i[1 * (s + j)];
+			RNS_K w2_i[2]; _load(2, w2_i, &w_i[2 * (s + j)], 1);
+			RNS_K w4_i[4]; _load(4, w4_i, &w_i[4 * (s + j)], 1);
 
 			for (size_t i = 0; i < m; ++i)
 			{
 				const size_t k = 8 * m * j + i;
-				RNS zl[8]; _load(8, zl, &z[k], m);
+				RNS_K zl[8]; _load(8, zl, &z[k], m);
 				_backward8(zl, w1_i, w2_i, w4_i);
 				_store(8, &z[k], m, zl);
 			}
 		}
 	}
 
-	static void forward8_0(RNS * const x, const RNS * const w, const size_t n_8)
+	static void forward8_0(RNS_K * const x, const RNS_K * const w, const size_t n_8)
 	{
 		// Montgomery form of MF of I to convert input into MF
-		const RNS w1 = w[0];
-		RNS w2[2]; _load(2, w2, &w[2], 1);
-		RNS w4[4]; _load(4, w4, &w[4], 1);
+		const RNS_K w1 = w[0];
+		RNS_K w2[2]; _load(2, w2, &w[2], 1);
+		RNS_K w4[4]; _load(4, w4, &w[4], 1);
 
 		for (size_t i = 0; i < n_8; ++i)
 		{
 			const size_t k = i;
-			RNS xl[8]; _load(8, xl, &x[k], n_8);
+			RNS_K xl[8]; _load(8, xl, &x[k], n_8);
 			_forward8_0(xl, w1, w2, w4);
 			_store(8, &x[k], n_8, xl);
 		}
 	}
 
-	static void square2x4(RNS * const x, const RNS * const w, const size_t n_8)
+	static void square2x4(RNS_K * const x, const RNS_K * const w, const size_t n_8)
 	{
 		for (size_t j = 0; j < n_8; ++j)
 		{
-			RNS w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
-			RNS w2_Q[2]; w2_Q[0] = w2[0].mul_Q(); w2_Q[1] = w2[1].mul_Q();
+			RNS_K w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
+			RNS_K w2_Q[2]; w2_Q[0] = w2[0].mul_Q(); w2_Q[1] = w2[1].mul_Q();
 
-			RNS xl[8]; _load(8, xl, &x[8 * j], 1);
+			RNS_K xl[8]; _load(8, xl, &x[8 * j], 1);
 			_square2x4(xl, w2, w2_Q);
 			_store(8, &x[8 * j], 1, xl);
 		}
 	}
 
-	static void square4x2(RNS * const x, const RNS * const w, const RNS * const w_i, const size_t n_8)
+	static void square4x2(RNS_K * const x, const RNS_K * const w, const RNS_K * const w_i, const size_t n_8)
 	{
 		for (size_t j = 0; j < n_8; ++j)
 		{
-			RNS w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
-			RNS w2_i[2]; _load(2, w2_i, &w_i[2 * (n_8 + j)], 1);
+			RNS_K w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
+			RNS_K w2_i[2]; _load(2, w2_i, &w_i[2 * (n_8 + j)], 1);
 
-			RNS xl[8]; _load(8, xl, &x[8 * j], 1);
+			RNS_K xl[8]; _load(8, xl, &x[8 * j], 1);
 			_square4x2(xl, w2, w2_i);
 			_store(8, &x[8 * j], 1, xl);
 		}
 	}
 
-	static void square8(RNS * const x, const RNS * const w, const RNS * const w_i, const size_t n_8)
+	static void square8(RNS_K * const x, const RNS_K * const w, const RNS_K * const w_i, const size_t n_8)
 	{
 		for (size_t j = 0; j < n_8; ++j)
 		{
-			const RNS w1 = w[1 * (n_8 + j)];
-			const RNS w1_i = w_i[1 * (n_8 + j)];
-			RNS w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
-			RNS w2_i[2]; _load(2, w2_i, &w_i[2 * (n_8 + j)], 1);
+			const RNS_K w1 = w[1 * (n_8 + j)];
+			const RNS_K w1_i = w_i[1 * (n_8 + j)];
+			RNS_K w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
+			RNS_K w2_i[2]; _load(2, w2_i, &w_i[2 * (n_8 + j)], 1);
 
-			RNS xl[8]; _load(8, xl, &x[8 * j], 1);
+			RNS_K xl[8]; _load(8, xl, &x[8 * j], 1);
 			_square8(xl, w1, w1_i, w2, w2_i);
 			_store(8, &x[8 * j], 1, xl);
 		}
 	}
 
-	static void mul2x4(RNS * const x, const RNS * const xp, const RNS * const w, const size_t n_8)
+	static void mul2x4(RNS_K * const x, const RNS_K * const xp, const RNS_K * const w, const size_t n_8)
 	{
 		for (size_t j = 0; j < n_8; ++j)
 		{
-			RNS w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
-			RNS w2_Q[2]; w2_Q[0] = w2[0].mul_Q(); w2_Q[1] = w2[1].mul_Q();
+			RNS_K w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
+			RNS_K w2_Q[2]; w2_Q[0] = w2[0].mul_Q(); w2_Q[1] = w2[1].mul_Q();
 
-			RNS zl[8]; _load(8, zl, &x[8 * j], 1);
-			RNS zpl[8]; _load(8, zpl, &xp[8 * j], 1);
+			RNS_K zl[8]; _load(8, zl, &x[8 * j], 1);
+			RNS_K zpl[8]; _load(8, zpl, &xp[8 * j], 1);
 			_mul2x4(zl, zpl, w2, w2_Q);
 			_store(8, &x[8 * j], 1, zl);
 		}
 	}
 
-	static void mul4x2(RNS * const x, const RNS * const xp, const RNS * const w, const RNS * const w_i, const size_t n_8)
+	static void mul4x2(RNS_K * const x, const RNS_K * const xp, const RNS_K * const w, const RNS_K * const w_i, const size_t n_8)
 	{
 		for (size_t j = 0; j < n_8; ++j)
 		{
-			RNS w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
-			RNS w2_i[2]; _load(2, w2_i, &w_i[2 * (n_8 + j)], 1);
+			RNS_K w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
+			RNS_K w2_i[2]; _load(2, w2_i, &w_i[2 * (n_8 + j)], 1);
 
-			RNS xl[8]; _load(8, xl, &x[8 * j], 1);
-			RNS xpl[8]; _load(8, xpl, &xp[8 * j], 1);
+			RNS_K xl[8]; _load(8, xl, &x[8 * j], 1);
+			RNS_K xpl[8]; _load(8, xpl, &xp[8 * j], 1);
 			_mul4x2(xl, xpl, w2, w2_i);
 			_store(8, &x[8 * j], 1, xl);
 		}
 	}
 
-	static void mul8(RNS * const x, const RNS * const xp, const RNS * const w, const RNS * const w_i, const size_t n_8)
+	static void mul8(RNS_K * const x, const RNS_K * const xp, const RNS_K * const w, const RNS_K * const w_i, const size_t n_8)
 	{
 		for (size_t j = 0; j < n_8; ++j)
 		{
-			const RNS w1 = w[1 * (n_8 + j)];
-			const RNS w1_i = w_i[1 * (n_8 + j)];
-			RNS w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
-			RNS w2_i[2]; _load(2, w2_i, &w_i[2 * (n_8 + j)], 1);
+			const RNS_K w1 = w[1 * (n_8 + j)];
+			const RNS_K w1_i = w_i[1 * (n_8 + j)];
+			RNS_K w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
+			RNS_K w2_i[2]; _load(2, w2_i, &w_i[2 * (n_8 + j)], 1);
 
-			RNS xl[8]; _load(8, xl, &x[8 * j], 1);
-			RNS xpl[8]; _load(8, xpl, &xp[8 * j], 1);
+			RNS_K xl[8]; _load(8, xl, &x[8 * j], 1);
+			RNS_K xpl[8]; _load(8, xpl, &xp[8 * j], 1);
 			_mul8(xl, xpl, w1, w1_i, w2, w2_i);
 			_store(8, &x[8 * j], 1, xl);
 		}
 	}
 
-	static void fwd4x2(RNS * const x, const RNS * const w, const size_t n_8)
+	static void fwd4x2(RNS_K * const x, const RNS_K * const w, const size_t n_8)
 	{
 		for (size_t j = 0; j < n_8; ++j)
 		{
-			RNS w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
+			RNS_K w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
 
-			RNS xl[8]; _load(8, xl, &x[8 * j], 1);
+			RNS_K xl[8]; _load(8, xl, &x[8 * j], 1);
 			_fwd4x2(xl, w2);
 			_store(8, &x[8 * j], 1, xl);
 		}
 	}
 
-	static void fwd8(RNS * const x, const RNS * const w, const size_t n_8)
+	static void fwd8(RNS_K * const x, const RNS_K * const w, const size_t n_8)
 	{
 		for (size_t j = 0; j < n_8; ++j)
 		{
-			const RNS w1 = w[1 * (n_8 + j)];
-			RNS w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
+			const RNS_K w1 = w[1 * (n_8 + j)];
+			RNS_K w2[2]; _load(2, w2, &w[2 * (n_8 + j)], 1);
 
-			RNS xl[8]; _load(8, xl, &x[8 * j], 1);
+			RNS_K xl[8]; _load(8, xl, &x[8 * j], 1);
 			_fwd8(xl, w1, w2);
 			_store(8, &x[8 * j], 1, xl);
 		}
@@ -586,14 +676,14 @@ private:
 	}
 
 	// modulo x^n - 1
-	void roots_R(RNS * const w, RNS * const wi)
+	void roots_R(RNS_K * const w, RNS_K * const wi)
 	{
 		const size_t n = size_t(1) << _ln;
 
-		RNS sr_s = RNS::primroot_n(_ln), sr_si = sr_s.invert();	// (-1)^{1/s}
+		RNS_K sr_s = RNS_K::primroot_n(_ln), sr_si = sr_s.invert();	// (-1)^{1/s}
 		for (size_t s = n / 2; s >= 1; s /= 2)
 		{
-			RNS t_j = RNS::one(), ti_j = RNS::one();
+			RNS_K t_j = RNS_K::one(), ti_j = RNS_K::one();
 			for (size_t j = 0; j < s; ++j)
 			{
 				const size_t jr = bitrev(j, s);
@@ -608,16 +698,16 @@ private:
 	}
 
 	// modulo x^n + 1
-	void roots_Q(RNS * const w, RNS * const wi)
+	void roots_Q(RNS_K * const w, RNS_K * const wi)
 	{
 		const size_t n = size_t(1) << _ln;
 
-		RNS sr_2s = RNS::primroot_n(_ln + 1), sr_2si = sr_2s.invert();	// (-1)^{1/2s}
+		RNS_K sr_2s = RNS_K::primroot_n(_ln + 1), sr_2si = sr_2s.invert();	// (-1)^{1/2s}
 		for (size_t s = n / 2; s >= 1; s /= 2)
 		{
-			const RNS sr_s = sr_2s * sr_2s, sr_si = sr_2si * sr_2si;	// (-1)^{1/s}
+			const RNS_K sr_s = sr_2s * sr_2s, sr_si = sr_2si * sr_2si;	// (-1)^{1/s}
 
-			RNS t_j = sr_2s, ti_j = sr_2si;
+			RNS_K t_j = sr_2s, ti_j = sr_2si;
 			for (size_t j = 0; j < s; ++j)
 			{
 				const size_t jr = bitrev(j, s);
@@ -631,7 +721,7 @@ private:
 		w[0] = w[1].toMonty();
 	}
 
-	void set(RNS * const y, const RNS * const x)
+	void set(RNS_K * const y, const RNS_K * const x)
 	{
 		if (x == y) return;
 
@@ -654,7 +744,7 @@ private:
 		return uint_32(r);
 	}
 
-	static constexpr void write_word(mp_limb_t * const x_ptr, const size_t bit_index, const uint_32 r)
+	static constexpr void write_word(mp_limb_t * const x_ptr, const size_t bit_index, const uint_64 r)
 	{
 		const size_t limb_index = bit_index / 64;
 		const int limb_shift = int(bit_index % 64);
@@ -662,12 +752,13 @@ private:
 		if (limb_shift != 0) x_ptr[limb_index + 1] |= mp_limb_t(r) >> (64 - limb_shift);
 	}
 
-	void set_mpz(RNS * const y, const mpz_t & x)
+	void set_mpz(RNS_K * const y, const mpz_t & x)
 	{
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
 		const uint_32 base = 1u << lbase;
-		const RNS rbase = _rbase;
+		const size_t prm_count = _prm_count, pck_factor = _pck_factor;
+		uint_32 * const buf = _buf;
 
 		const size_t x_size = mpz_size(x);
 		const mp_limb_t * const x_ptr = mpz_limbs_read(x);
@@ -675,54 +766,76 @@ private:
 		size_t bit_index = 0;
 		for (size_t i = 0; i < n; ++i)
 		{
-			const uint_32 r1 = read_word(x_ptr, x_size, bit_index) & (base - 1);
-			bit_index += size_t(lbase);
-			const uint_32 r2 = read_word(x_ptr, x_size, bit_index) & (base - 1);
-			bit_index += size_t(lbase);
-			y[i] = RNS(r1) + RNS(r2) * rbase;
+			for (size_t l = 0; l < pck_factor; ++l)
+			{
+				buf[l * n + i] = read_word(x_ptr, x_size, bit_index) & (base - 1);
+				bit_index += size_t(lbase);
+			}
+		}
+
+		if (prm_count == 4)
+		{
+			const RNS_K rbase4 = RNS_K(1u << lbase).toMonty();
+			for (size_t i = 0; i < n; ++i)
+			{
+				size_t j = pck_factor - 1;
+				RNS_K r = RNS_K(buf[j * n + i]); while (j > 0) {--j; r.encode(buf[j * n + i], rbase4); }
+				y[i] = r;
+			}
 		}
 	}
 
-	void get_mpz(mpz_t & y, const RNS * const x)
+	void get_mpz(mpz_t & y, const RNS_K * const x)
 	{
 		const size_t n = size_t(1) << _ln;
-		const int lbase = _lbase, lbase2 = 2 * lbase;
+		const size_t pck_factor = _pck_factor;
+		const int lbase = _lbase, lbase_pck = int(pck_factor) * lbase;
 		const uint_32 base = 1u << lbase;
+		uint_32 * const buf = _buf;
 
-		const size_t y_size = (size_t(lbase2) << _ln) / 64 + 2;
+		for (size_t l = 0; l < pck_factor; ++l)
+		{
+			for (size_t i = 0; i < n; ++i) buf[l * n + i] = x[i].get_r(l);
+		}
+
+		const size_t y_size = (size_t(lbase_pck) << _ln) / 64 + 2;
 		mp_limb_t * const y_ptr = mpz_limbs_write(y, mp_size_t(y_size));
 		for (size_t i = 0; i < y_size; ++i) y_ptr[i] = 0;
 
-		int_64 f = 0;
-		size_t bit_index = 0;
-		for (size_t i = 0; i < n; ++i)
+		long fr = 0;
+		if (pck_factor == 2)
 		{
-			f += x[i].get_i64();
-			const uint_32 r1 = (uint_32)(f) & (base - 1);
-			f >>= lbase;
-			const uint_32 r2 = (uint_32)(f) & (base - 1);
-			f >>= lbase;
+			const uint_64 base2 = base * uint_64(base);
+			RNS_S::big_type f = 0;
+			size_t bit_index = 0;
+			for (size_t i = 0; i < n; ++i)
+			{
+				uint_32 u[pck_factor]; for (size_t l = 0; l < pck_factor; ++l) u[l] = buf[l * n + i];
+				f += RNS_S(u).getS_i();
 
-			write_word(y_ptr, bit_index, r1);
-			bit_index += size_t(lbase);
-			write_word(y_ptr, bit_index, r2);
-			bit_index += size_t(lbase);
+				const uint_64 r = (uint_64)(f) & (base2 - 1);
+				f >>= 2 * lbase;
+
+				write_word(y_ptr, bit_index, r);
+				bit_index += size_t(2 * lbase);
+			}
+			fr = long(f);
 		}
 
 		mp_size_t s = mp_size_t(y_size);
 		while ((s > 0) && (y_ptr[s - 1] == 0)) --s;
  		mpz_limbs_finish(y, s);
 
-		if (f != 0)
+		if (fr != 0)
 		{
-			mpz_t t; mpz_init_set_si(t, long(f));
-			mpz_mul_2exp(t, t, mp_bitcnt_t(lbase2) << _ln);
+			mpz_t t; mpz_init_set_si(t, fr);
+			mpz_mul_2exp(t, t, mp_bitcnt_t(lbase_pck) << _ln);
 			mpz_add(y, y, t);
 			mpz_clear(t);
 		}
 	}
 
-	size_t NTT_forward8(RNS * const x, const RNS * const w)
+	size_t NTT_forward8(RNS_K * const x, const RNS_K * const w)
 	{
 		const size_t n = size_t(1) << _ln;
 
@@ -732,14 +845,14 @@ private:
 		return s;
 	}
 
-	void NTT_inverse8(RNS * const x, const RNS * const w_i, const size_t s0)
+	void NTT_inverse8(RNS_K * const x, const RNS_K * const w_i, const size_t s0)
 	{
 		const size_t n = size_t(1) << _ln;
 
 		for (size_t s = s0 / 8, m = n / 8 / s; m <= n / 8; m *= 8, s /= 8) backward8(x, w_i, m, s);
 	}
 
-	size_t NTT_forward(RNS * const x, const RNS * const w)
+	size_t NTT_forward(RNS_K * const x, const RNS_K * const w)
 	{
 		const size_t s0 = NTT_forward8(x, w);
 
@@ -750,7 +863,7 @@ private:
 		return s0;
 	}
 
-	void square(RNS * const x, const RNS * const w, const RNS * const w_i, const size_t s0)
+	void square(RNS_K * const x, const RNS_K * const w, const RNS_K * const w_i, const size_t s0)
 	{
 		const size_t n = size_t(1) << _ln;
 
@@ -759,7 +872,7 @@ private:
 		else if (s0 == n / 2) square2x4(x, w, n / 8);
 	}
 
-	void mul(RNS * const y, const RNS * const x, const RNS * const w, const RNS * const w_i, const size_t s0)
+	void mul(RNS_K * const y, const RNS_K * const x, const RNS_K * const w, const RNS_K * const w_i, const size_t s0)
 	{
 		const size_t n = size_t(1) << _ln;
 
@@ -768,74 +881,81 @@ private:
 		else if (s0 == n / 2) mul2x4(y, x, w, n / 8);
 	}
 
-	void carry_mul_sub(RNS * const x, const RNS * const y, int_128 * const carry, const uint_32 a)
+	void carry_mul_sub(RNS_K * const x, const RNS_K * const y, big_type * const carry, const uint_32 a)
 	{
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
-		const RNS & norm = _norm;
+		const RNS_K & norm = _norm;
 		const uint_32 base = 1u << lbase;
-		const RNS rbase = RNS(base).toMonty();
+		const uint_64 base2 = (uint_64)(1) << (2 * lbase);
+		const RNS_K rbase = RNS_K(base).toMonty();
 	
 		for (size_t i = 0; i < n / CARRY_LENGTH; ++i)
 		{
-			int_128 f = int128_set(0u, 0);
+			big_type f = big_zero();
 			for (size_t j = 0; j < CARRY_LENGTH; ++j)
 			{
 				const size_t k = i * CARRY_LENGTH + j;
 				// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF
-				f = int128_add(f, int128_mul_u32((x[k] * norm).get_i128(), a));
-				if (y != nullptr) f = int128_sub_i64(f, y[k].get_i64());
-				const uint_32 r1 = (uint_32)(f.s0) & (base - 1);
-				f = int128_rshift(f, lbase);
-				const uint_32 r2 = (uint_32)(f.s0) & (base - 1);
-				f = int128_rshift(f, lbase);
-				x[k] = RNS(r1) + RNS(r2) * rbase;
+				f = big_add(f, big_mul_u31((x[k] * norm).getK_i(), a));
+				if (y != nullptr) f = big_sub(f, y[k].getK_i());	// TODO getS_i
+				const uint_64 r01 = f.l[0] & (base2 - 1);
+				const uint_32 r0 = (uint_32)(r01) & (base - 1), r1 = (uint_32)(r01 >> lbase);
+				f = big_rshift(f, 2 * lbase);
+
+				RNS_K r = RNS_K(r1); r.encode(r0, rbase);
+				x[k] = r;
 			}
 			carry[i] = f;
 		}
 	}
 
-	void carry_complete(RNS * const x, int_128 * const carry, const bool nega)
+	void carry_complete(RNS_K * const x, big_type * const carry, const bool nega)
 	{
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
 		const uint_32 base = 1u << lbase;
-		const RNS rbase = RNS(base).toMonty();
+		const uint_64 base2 = (uint_64)(1) << (2 * lbase);
+		const RNS_K rbase = RNS_K(base).toMonty();
 
 		for (size_t i = 0; i < n / CARRY_LENGTH; ++i)
 		{
-			int_128 f = carry[((i == 0) ? (n / CARRY_LENGTH) : i) - 1];
-			if ((i == 0) && nega) f = int128_neg(f);
+			big_type f = carry[((i == 0) ? (n / CARRY_LENGTH) : i) - 1];
+			if ((i == 0) && nega) f = big_neg(f);
 
 			for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)
 			{
 				const size_t k = i * CARRY_LENGTH + j;
-				f = int128_add_u64(f, (uint_64)(x[k].get_i64()));	// x[k] >= 0
-				const uint_32 r1 = (uint_32)(f.s0) & (base - 1);
-				f = int128_rshift(f, lbase);
-				int_32 r2 = (int_32)((uint_32)(f.s0) & (base - 1));
-				f = int128_rshift(f, lbase);
+				f = big_add(f, x[k].getK_i());	// x[k] >= 0
+				const uint_64 r01 = f.l[0] & (base2 - 1);
+				const uint_32 r0 = (uint_32)(r01) & (base - 1); int_32 r1 = (int_32)(r01 >> lbase);
+				f = big_rshift(f, 2 * lbase);
+
 #if defined(BALANCED)
-				if (r2 >= (int_32)(base / 2)) { r2 -= (int_32)(base); f = int128_add_u64(f, 1); }
+				if (r1 >= (int_32)(base / 2)) { r1 -= (int_32)(base); f = big_inc(f); }
 #endif
-				x[k] = RNS(r1) + RNS().set_i(r2) * rbase;
+
+				RNS_K r = RNS_K().set_i32(r1); r.encode(r0, rbase);
+				x[k] = r;
 			}
 			const size_t k = i * CARRY_LENGTH + CARRY_LENGTH - 1;
-			f = int128_add_u64(f, (uint_64)(x[k].get_i64()));	// x[k] >= 0
-			const uint_32 r1 = (uint_32)(f.s0) & (base - 1);
-			f = int128_rshift(f, lbase);
-			const int_32 r2 = (int_32)(f.s0);
-			x[k] = RNS(r1) + RNS().set_i(r2) * rbase;
+			f = big_add(f, x[k].getK_i());	// x[k] >= 0
+			const int_64 r01 = (int_64)(f.l[0]);
+			const uint_32 r0 = (uint_32)(r01) & (base - 1); const int_32 r1 = (int_32)(r01 >> lbase);
+			RNS_K r = RNS_K().set_i32(r1); r.encode(r0, rbase);
+			x[k] = r;
 		}
 	}
 
 	// b-1, b-1, ..., b-1, b + a, ... => b, 0, ..., 0, a, ... 
-	void fix_base(RNS * const x, const char * const who)
+	void fix_base(RNS_K * const x, const char * const who)
 	{
 		const size_t n = size_t(1) << _ln;
-		const int lbase = _lbase, lbase2 = 2 * lbase;
-		const int_64 base2 = int_64(1) << lbase2;
-		const RNS rbase2 = _rbase2, rbase2_m1 = rbase2 - RNS(1);
+		const int lbase = _lbase;
+		const size_t pck_factor = _pck_factor;
+		const int_64 base2 = int_64(1) << (2 * lbase);
+		const RNS_K base = RNS_K(1u << lbase), rbase = base.toMonty();
+		const RNS_K rbase2 = base * rbase, rbase2_m1 = rbase2 - RNS_K(1);
 
 #if defined(CHECK_THEOREM)
 		static size_t i_max = 2;
@@ -848,48 +968,57 @@ private:
 #if defined(CHECK_THEOREM)
 			if (i > i_max) { i_max = i; std::cout << "fix_base " << who << ": i = " << i << " / " << n << std::endl; }
 #endif
-			if (x[n - i].get_i64() >= base2)
+			uint_32 hi_i[pck_factor]; for (size_t l = 0; l < pck_factor; ++l) hi_i[l] = x[n - i].get_r(l);
+			if (RNS_S(hi_i).getS_i() >= base2)	// >= base^n
 			{
 				x[n - i] -= rbase2;
-				for (size_t j = i - 1; j >= 2; --j) x[n - j] = RNS(0u);
+				for (size_t j = i - 1; j >= 2; --j) x[n - j] = RNS_K(0u);
 				x[n - 1] = rbase2;
 			}
 		}
 	}
 
-	void lower(RNS * const x, const int_32 l0)
+	void lower(RNS_K * const x, const int_32 l0)
 	{
 		const size_t n = size_t(1) << _ln;
-		const int lbase = _lbase, lbase2 = 2 * lbase;
-		const int_64 base2 = int_64(1) << lbase2;
+		const int lbase = _lbase;
+		const size_t pck_factor = _pck_factor;
+		const int_64 base2 = int_64(1) << (2 * lbase);
+		const RNS_K base = RNS_K(1u << lbase), rbase = base.toMonty();
+		const RNS_K rbase2 = base * rbase;
 
-		if (x[n - 1].get_i64() >= base2)	// >= base^n
+		uint_32 hi[pck_factor]; for (size_t l = 0; l < pck_factor; ++l) hi[l] = x[n - 1].get_r(l);
+		if (RNS_S(hi).getS_i() >= base2)	// >= base^n
 		{
 			// - R or Q
-			x[n - 1] -= _rbase2;
-			x[0] -= RNS().set_i(l0);
+			x[n - 1] -= rbase2;
+			x[0] -= RNS_K().set_i32(l0);
 		}
 	}
 
-	void positive(RNS * const x, const int_32 l0)
+	void positive(RNS_K * const x, const int_32 l0)
 	{
 		const size_t n = size_t(1) << _ln;
+		const RNS_K base = RNS_K(1u << _lbase), rbase = base.toMonty();
+		const size_t pck_factor = _pck_factor;
+		const RNS_K rbase2 = base * rbase;
 
 		for (size_t i = 0; i < n; ++i)
 		{
-			const int_64 u = x[n - 1 - i].get_i64();
+			uint_32 hi_i[pck_factor]; for (size_t l = 0; l < pck_factor; ++l) hi_i[l] = x[n - 1 - i].get_r(l);
+			const int_64 u = RNS_S(hi_i).getS_i();
 			if (u > 0) return;
 			if (u < 0)
 			{
 				// + R or Q
-				x[n - 1] += _rbase2;
-				x[0] += RNS().set_i(l0);
+				x[n - 1] += rbase2;
+				x[0] += RNS_K().set_i32(l0);
 				return;
 			}
 		}
 	}
 
-	void mod_Q(RNS * const x)
+	void mod_Q(RNS_K * const x)
 	{
 #if !defined(BALANCED)
 		fix_base(x, "Q");
@@ -901,12 +1030,13 @@ private:
 
 #if defined(CHECK_THEOREM)
 		const size_t n = size_t(1) << _ln;
+		const size_t pck_factor = _pck_factor;
 
 		double log_q = 0;
 		for (size_t i = 0; i < n; ++i)
 		{
-			const size_t j = n - 1 - i;
-			int_64 u = x[j].get_i64();
+			uint_32 hi_i[pck_factor]; for (size_t l = 0; l < pck_factor; ++l) hi_i[l] = x[n - 1 - i].get_r(l);
+			const int_64 u = RNS_S(hi_i).getS_i();
 			if (u != 0)
 			{
 #if !defined(BALANCED)
@@ -935,7 +1065,7 @@ private:
 #endif
 	}
 
-	void mod_R_add2(RNS * const x)
+	void mod_R_add2(RNS_K * const x)
 	{
 #if !defined(BALANCED)
 		fix_base(x, "R");
@@ -945,7 +1075,7 @@ private:
 		positive(x, -1);	// >= 0
 #endif
 
-		x[0] += RNS(2);
+		x[0] += RNS_K(2);
 	}
 
 	// Modular arithmetic
@@ -958,7 +1088,7 @@ private:
 	// 	std::cout << std::endl;
 	// }
 
-	void square_mul_mod_R(RNS * const y, const RNS * const x, const uint_32 a)
+	void square_mul_mod_R(RNS_K * const y, const RNS_K * const x, const uint_32 a)
 	{
 		set(y, x); const size_t s0 = NTT_forward8(y, _w_R);
 		square(y, _w_R, _wi_R, s0);
@@ -967,7 +1097,7 @@ private:
 		carry_complete(y, _carry, false);
 	}
 
-	void square_mul_mod_Q(RNS * const y, const RNS * const x, const uint_32 a)
+	void square_mul_mod_Q(RNS_K * const y, const RNS_K * const x, const uint_32 a)
 	{
 		set(y, x); const size_t s0 = NTT_forward8(y, _w_Q);
 		square(y, _w_Q, _wi_Q, s0);
@@ -976,7 +1106,7 @@ private:
 		carry_complete(y, _carry, true);
 	}
 
-	void mul_mod_R(RNS * const y, const RNS * const xt)
+	void mul_mod_R(RNS_K * const y, const RNS_K * const xt)
 	{
 		const size_t s0 = NTT_forward8(y, _w_R);
 		mul(y, xt, _w_R, _wi_R, s0);
@@ -985,7 +1115,7 @@ private:
 		carry_complete(y, _carry, false);
 	}
 
-	void mul_mod_Q(RNS * const y, const RNS * const xt)
+	void mul_mod_Q(RNS_K * const y, const RNS_K * const xt)
 	{
 		const size_t s0 = NTT_forward8(y, _w_Q);
 		mul(y, xt, _w_Q, _wi_Q, s0);
@@ -994,7 +1124,7 @@ private:
 		carry_complete(y, _carry, true);
 	}
 
-	void mul_sub_mod_Q(RNS * const y, const RNS * const xt, const RNS * const z)
+	void mul_sub_mod_Q(RNS_K * const y, const RNS_K * const xt, const RNS_K * const z)
 	{
 		const size_t s0 = NTT_forward8(y, _w_Q);
 		mul(y, xt, _w_Q, _wi_Q, s0);
@@ -1005,7 +1135,7 @@ private:
 
 	// Montgomery-McLaughlin-Gallot-Woltman multiplication
 
-	void reduceMMGW(RNS * const x)
+	void reduceMMGW(RNS_K * const x)
 	{
 		mul_mod_R(x, _Ninv_R);	// m'
 		mod_R_add2(x);
@@ -1014,7 +1144,7 @@ private:
 		mod_Q(x);
 	}
 
-	void mulMMGW(RNS * const x, const RNS * const y)
+	void mulMMGW(RNS_K * const x, const RNS_K * const y)
 	{
 		set(_t, y); NTT_forward(_t, _w_Q);
 		set(_t_Q, x); mul_mod_Q(_t_Q, _t);
@@ -1023,7 +1153,7 @@ private:
 		reduceMMGW(x);
 	}
 
-	void squareMMGW(RNS * const x, const uint_32 a)
+	void squareMMGW(RNS_K * const x, const uint_32 a)
 	{
 		square_mul_mod_Q(_t_Q, x, a);
 		square_mul_mod_R(x, x, a);
@@ -1073,11 +1203,11 @@ public:
 		const size_t n = size_t(1) << _ln;
 
 		uint_32 * const buf = new uint_32[4 * n];
-		for (size_t i = 0; i < 2; ++i)
+		for (size_t j = 0; j < 2; ++j)
 		{
 			if (!cfile.read(reinterpret_cast<char *>(buf), 4 * n * sizeof(uint_32))) { delete[] buf; return false; }
-			RNS * const reg = _reg[i];
-			for (size_t k = 0; k < n; ++k) reg[k] = RNS(buf[k + 0 * n], buf[k + 1 * n], buf[k + 2 * n], buf[k + 3 * n]);
+			RNS_K * const reg = _reg[j];
+			for (size_t i = 0; i < n; ++i) reg[i] = RNS_K(buf[0 * n + i], buf[1 * n + i], buf[2 * n + i], buf[3 * n + i]);
 		}
 		delete[] buf;
 
@@ -1087,16 +1217,16 @@ public:
 	void save_checkpoint(file & cfile) override
 	{
 		const size_t n = size_t(1) << _ln;
+		const size_t prm_count = _prm_count;
 
 		uint_32 * const buf = new uint_32[4 * n];
-		for (size_t i = 0; i < 2; ++i)
+		for (size_t j = 0; j < 2; ++j)
 		{
-			const RNS * const reg = _reg[i];
-			for (size_t k = 0; k < n; ++k)
+			const RNS_K * const reg = _reg[j];
+			for (size_t i = 0; i < n; ++i)
 			{
-				const RNS & r = reg[k];
-				buf[k + 0 * n] = r.get_r1(); buf[k + 1 * n] = r.get_r2();
-				buf[k + 2 * n] = r.get_r3(); buf[k + 3 * n] = r.get_r4();
+				const RNS_K & r = reg[i];
+				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
 			}
 			if (!cfile.write(reinterpret_cast<const char *>(buf), 4 * n * sizeof(uint_32))) break;
 		}
@@ -1106,13 +1236,15 @@ public:
 public:
 	transformCPU(const mpz_t & N, const int32_t a) : transform()
 	{
+		_prm_count = 4; _pck_factor = 2;
+
 		mpz_t R, t; mpz_inits(_Nz, R, t, nullptr);
 
 		// R = base^n - 1, Q = base^n + 1 such that base^n > 16 * a * N and n is a power of two
 		long e_n; const double m_n = mpz_get_d_2exp(&e_n, N);
 		const double log2_16aN = std::log2(16.0 * a) + std::log2(m_n) + e_n;
 
-		const double p_2a = ZP1::P() * double(ZP2::P()) * double(ZP3::P()) * double(ZP4::P()) / 2 / a;
+		const double p_2a = ZP0::P() * double(ZP1::P()) * double(ZP2::P()) * double(ZP3::P()) / 2 / a;
 		int ln;
 		for (int lbase2 = 62; lbase2 >= 2; lbase2 -= 2)
 		{
@@ -1130,21 +1262,20 @@ public:
 		}
 		const size_t n = size_t(1) << ln;
 		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase), lbase2 = 2 * lbase;
-		const RNS base = RNS(1u << lbase);
-		_rbase = base.toMonty();
-		_rbase2 = base * _rbase;
-		_norm = RNS::norm(ln - 1);
+		_norm = RNS_K::norm(ln - 1);
 
-		_N_Q = new RNS[n]; _Ninv_R = new RNS[n]; _one = new RNS[n];
-		_t_Q = new RNS[n];  _t = new RNS[n];
-		for (size_t i = 0; i < reg_count; ++i) _reg[i] = new RNS[n];
+		_buf = new uint32_t[_prm_count * n];
 
-		_w_R = new RNS[n]; _wi_R = new RNS[n];
+		_N_Q = new RNS_K[n]; _Ninv_R = new RNS_K[n]; _one = new RNS_K[n];
+		_t_Q = new RNS_K[n];  _t = new RNS_K[n];
+		for (size_t i = 0; i < reg_count; ++i) _reg[i] = new RNS_K[n];
+
+		_w_R = new RNS_K[n]; _wi_R = new RNS_K[n];
 		roots_R(_w_R, _wi_R);
-		_w_Q = new RNS[n]; _wi_Q = new RNS[n];
+		_w_Q = new RNS_K[n]; _wi_Q = new RNS_K[n];
 		roots_Q(_w_Q, _wi_Q);
 
-		_carry = new int_128[n / CARRY_LENGTH];
+		_carry = new big_type[n / CARRY_LENGTH];
 
 #if defined(CHECK_THEOREM)
 		long eN; const double mN = mpz_get_d_2exp(&eN, N);
@@ -1195,6 +1326,7 @@ public:
 		delete[] _w_Q; delete[] _wi_Q;
 
 		delete[] _carry;
+		delete[] _buf;
 	}
 
 	std::string get_type() const override { return ""; }
