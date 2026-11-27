@@ -427,7 +427,7 @@ public:
 	RNS_K() {}
 	explicit RNS_K(const uint_32 n) : _r0(n), _r1(n), _r2(n), _r3(n), _r4(n) {}
 	explicit RNS_K(const uint_32 n[5]) : _r0(n[0]), _r1(n[1]), _r2(n[2]), _r3(n[3]), _r4(n[4]) {}
-	explicit RNS_K(const pck_type & r) : _r0(r.r[0]), _r1(r.r[1]), _r2(r.r[2]), _r3(r.r[3]) {} // PCK_FACTOR = 4
+	explicit RNS_K(const pck_type & r) : _r0(r.r[0]), _r1(r.r[1]), _r2(r.r[2]), _r3(r.r[3]), _r4(0) {} // PCK_FACTOR = 4
 
 	static RNS_K one() { return RNS_K(ZP0::one(), ZP1::one(), ZP2::one(), ZP3::one(), ZP4::one()); }
 
@@ -1524,8 +1524,6 @@ public:
 	{
 		_prm_count = PRM_COUNT; _pck_factor = PCK_FACTOR;
 
-		mpz_t R, t; mpz_inits(_Nz, R, t, nullptr);
-
 		// R = base^n - 1, Q = base^n + 1 such that base^n > 16 * a * N and n is a power of two
 		long e_n; const double m_n = mpz_get_d_2exp(&e_n, N);
 		const double log2_16aN = std::log2(16.0 * a) + std::log2(m_n) + e_n;
@@ -1551,6 +1549,8 @@ public:
 		roots_Q(_w_Q, _wi_Q);
 
 		_carry = new big_type[n / CARRY_LENGTH];
+
+		mpz_t R, t; mpz_inits(_Nz, R, t, nullptr);
 
 #if defined(CHECK_THEOREM)
 		long eN; const double mN = mpz_get_d_2exp(&eN, N);

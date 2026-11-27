@@ -230,9 +230,6 @@ public:
 class RNS3 : public RNS<3>
 {
 public:
-	// typedef int_96 big_type;
-
-public:
 	RNS3() {}
 	explicit RNS3(const uint_32 n) : RNS(n) {}
 	explicit RNS3(const uint_32 * const n) : RNS(n) {}
@@ -254,7 +251,29 @@ public:
 class RNS4 : public RNS<4>
 {
 public:
-	// typedef int_128 big_type;
+	typedef __int128_t big_type;
+
+	finline __int128_t garner4() const
+	{
+		static const uint_32 P0 = Mod::P[0], P1 = Mod::P[1], P2 = Mod::P[2], P3 = Mod::P[3];
+		static const ZP INVP1_P0 = Mod::invert(Mod::toMonty(P1, 0), 0);
+		static const ZP INVP2_P0 = Mod::invert(Mod::toMonty(P2, 0), 0);
+		static const ZP INVP3_P0 = Mod::invert(Mod::toMonty(P3, 0), 0);
+		static const ZP INVP2_P1 = Mod::invert(Mod::toMonty(P2, 1), 1);
+		static const ZP INVP3_P1 = Mod::invert(Mod::toMonty(P3, 1), 1);
+		static const ZP INVP3_P2 = Mod::invert(Mod::toMonty(P3, 2), 2);
+
+		// convert to mixed-radix representation, we must have P3 < P2 < P1 < P0
+		const uint_32 u3 = _r[3];
+		const uint_32 u2 = Mod::submul(_r[2], u3, INVP3_P2, 2);
+		const uint_32 u1 = Mod::submul(Mod::submul(_r[1], u3, INVP3_P1, 1), u2, INVP2_P1, 1);
+		const uint_32 u0 = Mod::submul(Mod::submul(Mod::submul(_r[0], u3, INVP3_P0, 0), u2, INVP2_P0, 0), u1, INVP1_P0, 0);
+		const int_32 i0 = (u0 > P0 / 2) ? (int_32)(u0 - P0) : (int_32)(u0);
+
+		const uint_64 u23 = u3 + (uint_64)(P3) * u2;
+		const int_64 i01 = (int_64)(u1) + (int_64)(P1) * i0;
+		return (__int128_t)(P2 * (uint_64)(P3)) * i01 + u23;
+	}
 
 public:
 	RNS4() {}
@@ -273,6 +292,29 @@ public:
 	static RNS4 norm(const int ln) { RNS4 r; r._norm(ln); return r; }
 
 	void encode(const ZP & rhs, const RNS4 & base) { *this *= base; *this += RNS4(rhs); }
+
+	big_type getS_i() const { return garner4(); }
+};
+
+class RNS5 : public RNS<5>
+{
+public:
+	RNS5() {}
+	explicit RNS5(const uint_32 n) : RNS(n) {}
+	explicit RNS5(const uint_32 * const n) : RNS(n) {}
+
+	RNS5 & operator+=(const RNS5 & rhs) { _add(rhs); return *this; }
+	RNS5 & operator-=(const RNS5 & rhs) { _sub(rhs); return *this; }
+	RNS5 & operator*=(const RNS5 & rhs) { _mul(rhs); return *this; }
+
+	RNS5 operator+(const RNS5 & rhs) const { RNS5 r = *this; r += rhs; return r; }
+	RNS5 operator-(const RNS5 & rhs) const { RNS5 r = *this; r -= rhs; return r; }
+	RNS5 operator*(const RNS5 & rhs) const { RNS5 r = *this; r *= rhs; return r; }
+
+	RNS5 toMonty() const { RNS5 r = *this; r._toMonty(); return r; }
+	static RNS5 norm(const int ln) { RNS5 r; r._norm(ln); return r; }
+
+	void encode(const ZP & rhs, const RNS5 & base) { *this *= base; *this += RNS5(rhs); }
 };
 
 template<int LN>
@@ -317,39 +359,28 @@ private:
 		const size_t n = size_t(1) << LN;
 		const int lbase = _lbase;
 		const uint_32 base = 1u << lbase;
-		const size_t prm_count = _prm_count;
+		const size_t prm_count = _prm_count, pck_factor = _pck_factor;
 		ZP * const buf = _buf;
 
 		const size_t x_size = mpz_size(x);
 		const mp_limb_t * const x_ptr = mpz_limbs_read(x);
 
-		if (_pck_factor == 1)
+		size_t bit_index = 0;
+		for (size_t i = 0; i < n; ++i)
 		{
-			size_t bit_index = 0;
-			for (size_t i = 0; i < n; ++i)
+			for (size_t l = 0; l < pck_factor; ++l)
 			{
-				buf[0 * n + i] = read_word(x_ptr, x_size, bit_index) & (base - 1);
+				buf[l * n + i] = read_word(x_ptr, x_size, bit_index) & (base - 1);
 				bit_index += size_t(lbase);
 			}
 		}
-		else if (_pck_factor == 2)
-		{
-			size_t bit_index = 0;
-			for (size_t i = 0; i < n; ++i)
-			{
-				buf[0 * n + i] = read_word(x_ptr, x_size, bit_index) & (base - 1);
-				bit_index += size_t(lbase);
-				buf[1 * n + i] = read_word(x_ptr, x_size, bit_index) & (base - 1);
-				bit_index += size_t(lbase);
-			}
-		}
-		else {}	// TODO
 
 		if (prm_count == 2)
 		{
 			for (size_t i = 0; i < n; ++i)
 			{
-				const RNS2 r = RNS2(buf[0 * n + i]);
+				size_t j = pck_factor - 1;
+				RNS2 r = RNS2(buf[j * n + i]); // while (j > 0) {--j; r.encode(buf[j * n + i], rbase2); }
 				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
 			}
 		}
@@ -358,8 +389,8 @@ private:
 			const RNS3 rbase3 = RNS3(1u << lbase).toMonty();
 			for (size_t i = 0; i < n; ++i)
 			{
-				RNS3 r = RNS3(buf[1 * n + i]);
-				r.encode(buf[0 * n + i], rbase3);
+				size_t j = pck_factor - 1;
+				RNS3 r = RNS3(buf[j * n + i]); while (j > 0) {--j; r.encode(buf[j * n + i], rbase3); }
 				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
 			}
 		}
@@ -368,8 +399,18 @@ private:
 			const RNS4 rbase4 = RNS4(1u << lbase).toMonty();
 			for (size_t i = 0; i < n; ++i)
 			{
-				RNS4 r = RNS4(buf[1 * n + i]);
-				r.encode(buf[0 * n + i], rbase4);
+				size_t j = pck_factor - 1;
+				RNS4 r = RNS4(buf[j * n + i]); while (j > 0) {--j; r.encode(buf[j * n + i], rbase4); }
+				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
+			}
+		}
+		else if (prm_count == 5)
+		{
+			const RNS5 rbase5 = RNS5(1u << lbase).toMonty();
+			for (size_t i = 0; i < n; ++i)
+			{
+				size_t j = pck_factor - 1;
+				RNS5 r = RNS5(buf[j * n + i]); while (j > 0) {--j; r.encode(buf[j * n + i], rbase5); }
 				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
 			}
 		}
@@ -381,19 +422,19 @@ private:
 	void get_mpz(mpz_t & y, const size_t reg_x)
 	{
 		const size_t n = size_t(1) << LN;
-		const int lbase = _lbase, lbase_pck = int(_pck_factor) * lbase;
+		const size_t pck_factor = _pck_factor;
+		const int lbase = _lbase, lbase_pck = int(pck_factor) * lbase;
 		const uint_32 base = 1u << lbase;
 		ZP * const buf = _buf;
 
-		_engine.read_memory(0 * Reg_count + reg_x, &buf[0 * n]);
-		if (_pck_factor > 1) _engine.read_memory(1 * Reg_count + reg_x, &buf[1 * n]);
+		for (size_t l = 0; l < pck_factor; ++l) _engine.read_memory(l * Reg_count + reg_x, &buf[l * n]);
 
 		const size_t y_size = (size_t(lbase_pck) << LN) / 64 + 2;
 		mp_limb_t * const y_ptr = mpz_limbs_write(y, mp_size_t(y_size));
 		for (size_t i = 0; i < y_size; ++i) y_ptr[i] = 0;
 
 		long fr = 0;
-		if (_pck_factor == 1)
+		if (pck_factor == 1)
 		{
 			RNS1::big_type f = 0;
 			size_t bit_index = 0;
@@ -408,19 +449,42 @@ private:
 			}
 			fr = long(f);
 		}
-		else if (_pck_factor == 2)
+		else if (pck_factor == 2)
 		{
 			const uint_64 base2 = base * uint_64(base);
 			RNS2::big_type f = 0;
 			size_t bit_index = 0;
 			for (size_t i = 0; i < n; ++i)
 			{
-				uint_32 u[_pck_factor]; for (size_t l = 0; l < _pck_factor; ++l) u[l] = buf[l * n + i];
+				uint_32 u[pck_factor]; for (size_t l = 0; l < pck_factor; ++l) u[l] = buf[l * n + i];
 				f += RNS2(u).getS_i();
+
 				const uint_64 r = (uint_64)(f) & (base2 - 1);
 				f >>= 2 * lbase;
 
 				write_word(y_ptr, bit_index, r);
+				bit_index += size_t(2 * lbase);
+			}
+			fr = long(f);
+		}
+		else if (pck_factor == 4)
+		{
+			const uint_64 base2 = base * uint_64(base);
+			RNS4::big_type f = 0;
+			size_t bit_index = 0;
+			for (size_t i = 0; i < n; ++i)
+			{
+				uint_32 u[pck_factor]; for (size_t l = 0; l < pck_factor; ++l) u[l] = buf[l * n + i];
+				f += RNS4(u).getS_i();
+
+				const uint_64 r0 = (uint_64)(f) & (base2 - 1);
+				f >>= 2 * lbase;
+				const uint_64 r1 = (uint_64)(f) & (base2 - 1);
+				f >>= 2 * lbase;
+
+				write_word(y_ptr, bit_index, r0);
+				bit_index += size_t(2 * lbase);
+				write_word(y_ptr, bit_index, r1);
 				bit_index += size_t(2 * lbase);
 			}
 			fr = long(f);
@@ -433,6 +497,7 @@ private:
 
 		if (fr != 0)
 		{
+			std::cout << "warning" << std::endl;
 			mpz_t t; mpz_init_set_si(t, fr);
 			mpz_mul_2exp(t, t, mp_bitcnt_t(lbase_pck) << LN);
 			mpz_add(y, y, t);
@@ -640,12 +705,12 @@ public:
 	transformGPU(const mpz_t & N, const size_t device_id, const int lbase, const size_t prm_count, const size_t pck_factor)
 		: transform(), _engine(device_id, prm_count, pck_factor), _lbase(lbase), _prm_count(prm_count), _pck_factor(pck_factor)
 	{
-		mpz_t R, t; mpz_inits(_Nz, R, t, nullptr);
-
 		const size_t n = size_t(1) << LN;
 		const mp_bitcnt_t lbase_pck = mp_bitcnt_t(pck_factor) * mp_bitcnt_t(lbase);
 
 		_buf = new ZP[prm_count * n];
+
+		mpz_t R, t; mpz_inits(_Nz, R, t, nullptr);
 
 		mpz_set_ui(R, 1); mpz_mul_2exp(R, R, lbase_pck << LN); mpz_sub_ui(R, R, 1);
 		if (mpz_invert(t, N, R) == 0)
@@ -672,23 +737,24 @@ public:
 		}
 
 		// Not converted into Montgomery form such that output is converted out of MF
-		const RNS4 norm = RNS4::norm(LN - 1);
+		const RNS5 norm = RNS5::norm(LN - 1);
 		src << "__constant uint g_norm[" << prm_count << "] = { " << norm.get_r(0) << "u";
-		for (size_t l = 1; l < prm_count; ++l) src << ", " << norm.get_r(l) << "u";
+		for (size_t k = 1; k < prm_count; ++k) src << ", " << norm.get_r(k) << "u";
 		src << " };" << std::endl;
 
-		const RNS4 rbase = RNS4(1u << lbase).toMonty();
+		const RNS5 rbase = RNS5(1u << lbase).toMonty();
 		src << "__constant uint g_base[" << prm_count << "] = { " << rbase.get_r(0) << "u";
-		for (size_t l = 1; l < prm_count; ++l) src << ", " << rbase.get_r(l) << "u";
+		for (size_t k = 1; k < prm_count; ++k) src << ", " << rbase.get_r(k) << "u";
 		src << " };" << std::endl;
 
-		RNS4 rbase_pck = RNS4(1u << lbase); for (size_t l = 1; l < pck_factor; ++l) rbase_pck *= rbase;
+		RNS5 rbase_pck = RNS5(1u << lbase); for (size_t l = 1; l < pck_factor; ++l) rbase_pck *= rbase;
 		src << "__constant uint g_base_pck[" << prm_count << "] = { " << rbase_pck.get_r(0) << "u";
-		for (size_t l = 1; l < prm_count; ++l) src << ", " << rbase_pck.get_r(l) << "u";
+		for (size_t k = 1; k < prm_count; ++k) src << ", " << rbase_pck.get_r(k) << "u";
 		src << " };" << std::endl;
 
 		src << "#define INVP1_P0\t" << Mod::invert(Mod::toMonty(Mod::P[1], 0), 0) << "u" << std::endl;
 
+		// TODO loops
 		if (prm_count >= 3)
 		{
 			src << "#define INVP2_P0\t" << Mod::invert(Mod::toMonty(Mod::P[2], 0), 0) << "u" << std::endl;
@@ -699,6 +765,13 @@ public:
 			src << "#define INVP3_P0\t" << Mod::invert(Mod::toMonty(Mod::P[3], 0), 0) << "u" << std::endl;
 			src << "#define INVP3_P1\t" << Mod::invert(Mod::toMonty(Mod::P[3], 1), 1) << "u" << std::endl;
 			src << "#define INVP3_P2\t" << Mod::invert(Mod::toMonty(Mod::P[3], 2), 2) << "u" << std::endl;
+		}
+		if (prm_count >= 5)
+		{
+			src << "#define INVP4_P0\t" << Mod::invert(Mod::toMonty(Mod::P[4], 0), 0) << "u" << std::endl;
+			src << "#define INVP4_P1\t" << Mod::invert(Mod::toMonty(Mod::P[4], 1), 1) << "u" << std::endl;
+			src << "#define INVP4_P2\t" << Mod::invert(Mod::toMonty(Mod::P[4], 2), 2) << "u" << std::endl;
+			src << "#define INVP4_P3\t" << Mod::invert(Mod::toMonty(Mod::P[4], 3), 3) << "u" << std::endl;
 		}
 
 		src << "#define CARRY_LENGTH\t" << CARRY_LENGTH << "u"  << std::endl;
@@ -781,7 +854,7 @@ public:
 	std::string get_info_short() const override
 	{
 		const size_t n = size_t(1) << LN;
-		std::ostringstream ss; ss << _prm_count << "-prime NTT of length " << n << ", packed-base = 2^{" << _pck_factor << "x" << _lbase << "} bits";
+		std::ostringstream ss; ss << _prm_count << "-prime NTT of length " << n << ", packed-base = 2^{" << _pck_factor << "x" << _lbase << "}";
 		return (ss.str());
 	}
 
@@ -792,7 +865,7 @@ public:
 	}
 };
 
-inline void get_n_base(int & rln, int & rlbase, const int pck_factor, const double log2_16aN, const double p_2a)
+inline void get_n_base(int & rln, int & rlbase, const int pck_factor, const double log2_16aN, const double log2_p_2a)
 {
 	for (int lbase = 31; lbase >= 2; --lbase)
 	{
@@ -800,8 +873,8 @@ inline void get_n_base(int & rln, int & rlbase, const int pck_factor, const doub
 		int ln = 4; while (double(lbase * pck_factor) * (1 << ln) < log2_16aN) ++ln;
 
 		// A necessary condition is a * n * (base - 1)^2 < Prod_i(Pi) / 2
-		const double dbase = std::pow(2.0, lbase * pck_factor);
-		if ((1 << ln) * (dbase - 1) * (dbase - 1) < p_2a)
+		const int log2_base = lbase * pck_factor;
+		if (ln + 2 * log2_base < log2_p_2a)
 		{
 			rln = ln;
 			rlbase = lbase;
@@ -815,19 +888,20 @@ inline size_t get_s(const size_t K)
 	int s = -1; for (size_t k = K - 1; k != 0; k /= 2) ++s;
 	return size_t(1) << s;
 }
+
 inline transform * create_transformGPU(const mpz_t & N, const int32_t a, const size_t device_id)
 {
 	// R = base^n - 1, Q = base^n + 1 such that base^n > 16 * a * N and n is a power of two
 	long e_n; const double m_n = mpz_get_d_2exp(&e_n, N);
 	const double log2_16aN = std::log2(16.0 * a) + std::log2(m_n) + e_n;
 
-	double p_2a = double(Mod::P[0]) / 2 / a;
+	double log2_p_2a = std::log2(double(Mod::P[0])) - std::log2(2.0 * a);
 	uint64_t c_min = uint64_t(-1), c_2 = 0; size_t K_min = 0;
-	for (size_t K = 2; K < 5; ++K)	// Mod::PSIZE
+	for (size_t K = 2; K < 6; ++K)	// Mod::PSIZE
 	{
-		p_2a *= double(Mod::P[K - 1]);
+		log2_p_2a += std::log2(double(Mod::P[K - 1]));
 		const size_t s = get_s(K);
-		int ln = 0, lbase = 0; get_n_base(ln, lbase, s, log2_16aN, p_2a);
+		int ln = 0, lbase = 0; get_n_base(ln, lbase, s, log2_16aN, log2_p_2a);
 
 		const uint64_t c = K * uint64_t(1u << ln) * uint64_t(ln);
 		if (c < c_min) { c_min = c; K_min = K; }
@@ -838,9 +912,10 @@ inline transform * create_transformGPU(const mpz_t & N, const int32_t a, const s
 	std::cout << "K_min = " << K_min << ", K*n*ln = " << c_min << ", " << c_min / double(c_2) << std::endl;
 
 	const size_t prm_count = K_min, pck_factor = get_s(prm_count);
+	// const size_t prm_count = 5, pck_factor = get_s(prm_count);
 
-	p_2a = double(Mod::P[0]) / 2 / a; for (size_t k = 1; k < prm_count; ++k) p_2a *= double(Mod::P[k]);
-	int ln = 0, lbase = 0; get_n_base(ln, lbase, pck_factor, log2_16aN, p_2a);
+	log2_p_2a = std::log2(double(Mod::P[0])) - std::log2(2.0 * a); for (size_t k = 1; k < prm_count; ++k) log2_p_2a += std::log2(double(Mod::P[k]));
+	int ln = 0, lbase = 0; get_n_base(ln, lbase, pck_factor, log2_16aN, log2_p_2a);
 
 #if defined(QUICK_TEST)
 	if (ln < 4) throw std::runtime_error("NTT size < 2^4 is not supported");
