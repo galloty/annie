@@ -17,6 +17,9 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define BALANCED		true
 #define CARRY_LENGTH	4u
 
+#define PRM_COUNT		5
+#define PCK_FACTOR		4
+
 typedef uint32_t	uint_32;
 typedef int32_t		int_32;
 typedef uint64_t	uint_64;
@@ -47,12 +50,36 @@ inline uint_64 _subcc(const uint_64 a, const uint_64 b, bool * const carry)
 	return c;
 }
 
-// 128-bit arithmetic
+typedef struct { uint_32 r[PCK_FACTOR]; } pck_type;
 
+#if (PRM_COUNT == 4)
+
+// 128-bit
 #define BIG_LSIZE	1
 #define HTYPE		int_64
 
-typedef struct { uint_64 l[1]; HTYPE h; } big_type;
+#elif (PRM_COUNT == 5)
+
+// 160-bit
+#define BIG_LSIZE	2
+#define HTYPE		int_32
+
+#endif
+
+// typedef signed _BitInt(160) big_check;
+
+// void print_big_check(const big_check & x)
+// {
+// 	big_check t = x;
+// 	uint32_t d[5];
+// 	for (size_t i = 0; i < 5; ++i) { d[i] = uint32_t(t); t >>= 32; }
+// 	for (size_t i = 0; i < 5; ++i) { printf("%08x ", d[5 - 1 - i]); }
+// 	printf("- ");
+// }
+
+// inline big_check get_check(const big_type & x) { big_check r = x.h; for (size_t i = 0; i < BIG_LSIZE; ++i) r = (r << 64) | x.l[BIG_LSIZE - 1 - i]; return r; }
+
+typedef struct { uint_64 l[BIG_LSIZE]; HTYPE h; } big_type;
 
 inline big_type big_zero() { big_type r; for (size_t i = 0; i < BIG_LSIZE; ++i) r.l[i] = 0; r.h = 0; return r; }
 
@@ -84,7 +111,7 @@ inline big_type _big_add_u64(const big_type & x, const uint_64 & y)
 
 inline big_type big_inc(const big_type x) { return _big_add_u64(x, 1); }
 
-inline big_type big_mul_u31(const big_type x, const uint_32 y)	// y < 2^31
+inline big_type big_mul_u32(const big_type x, const uint_32 y)
 {
 	big_type r;
 	uint_32 carry = 0;
@@ -98,23 +125,7 @@ inline big_type big_mul_u31(const big_type x, const uint_32 y)	// y < 2^31
 		r.l[i] = (sh << 32) | (uint_32)(sl);
 	}
 	r.h = x.h * (HTYPE)(y) + (HTYPE)(carry);
-	return r;
-}
-
-inline big_type big_mul_u32(const big_type x, const uint_32 y)	// TODO factor with big_mul_u31
-{
-	big_type r;
-	uint_32 carry = 0;
-	for (size_t i = 0; i < BIG_LSIZE; ++i)
-	{
-		const uint_32 xl = (uint_32)(x.l[i]), xh = (uint_32)(x.l[i] >> 32);
-		const uint_64 sl = xl * (uint_64)(y) + carry;
-		carry = (uint_32)(sl >> 32);
-		const uint_64 sh = xh * (uint_64)(y) + carry;
-		carry = (uint_32)(sh >> 32);
-		r.l[i] = (sh << 32) | (uint_32)(sl);
-	}
-	r.h = (HTYPE)(x.h * (int_64)(y) + carry);
+	// r.h = (HTYPE)(x.h * (int_64)(y) + carry);
 	return r;
 }
 
@@ -131,6 +142,48 @@ inline big_type big_rshift(const big_type x, const int s)	// s != 0
 	return r;
 }
 
+#if (PCK_FACTOR == 2)
+
+inline big_type big_add_pck(const big_type & x, const pck_type & y, const int lbase) { return _big_add_u64(x, y.r[0] | ((uint_64)(y.r[1]) << lbase)); }
+
+inline bool big_ge_pow_2_s(const big_type x, const int s)	// x >= 2^s
+{
+	if (x.h < 0) return false;
+	// PCK_FACTOR = 2 then s < 64
+	if (x.h != 0) return true;
+	return ((x.l[0] >> s) != 0);
+}
+
+#elif (PCK_FACTOR == 4)
+
+inline big_type big_add_pck(const big_type & x, const pck_type & y, const int lbase)
+{
+	big_type t; t.l[0] = y.r[2] | ((uint_64)(y.r[3]) << lbase);
+	t.l[1] = t.l[0] >> (64 - 2*lbase); t.l[0] <<= 2*lbase;
+	t.l[0] |= y.r[0] | ((uint_64)(y.r[1]) << lbase);
+	t.h = 0;
+	return big_add(x, t);
+}
+
+inline bool big_ge_pow_2_s(const big_type x, const int s)	// x >= 2^s
+{
+	if (x.h < 0) return false;
+	// PCK_FACTOR = 4 then s < 128
+	if (x.h != 0) return true;
+	if (s < 64)
+	{
+		for (size_t i = 1; i < BIG_LSIZE; ++i) if (x.l[i] != 0) return true;
+		return ((x.l[0] >> s) != 0);
+	}
+	else
+	{
+		for (size_t i = 2; i < BIG_LSIZE; ++i) if (x.l[i] != 0) return true;
+		return ((x.l[1] >> (s - 64)) != 0);
+	}
+}
+
+#endif
+
 inline big_type _big_mul_u64i64(const uint_64 x, const int_64 y)
 {
 	const uint_32 x0 = (uint_32)(x), x1 = (uint_32)(x >> 32);
@@ -143,7 +196,12 @@ inline big_type _big_mul_u64i64(const uint_64 x, const int_64 y)
 
 	big_type r;
 	r.l[0] = (uint_64)(s01 << 32) | (uint_32)(s00);
+#if (PRM_COUNT == 4)
 	r.h = s11;
+#elif (PRM_COUNT == 5)
+	r.l[1] = (uint_64)(s11);
+	r.h = (s11 < 0) ? (HTYPE)(-1) : 0;
+#endif
 	return r;
 }
 
@@ -236,15 +294,16 @@ using ZP0 = ZPT<(125u << 25) + 1, 3>;
 using ZP1 = ZPT<(243u << 24) + 1, 7>;
 using ZP2 = ZPT<(235u << 24) + 1, 3>;
 using ZP3 = ZPT<( 29u << 27) + 1, 3>;
+using ZP4 = ZPT<( 13u << 28) + 1, 3>;
 
-// The residue number system {P1, P2}
+// The residue number system {P0, P1, ...}
+
+#if (PRM_COUNT == 4)
+
 class RNS_K
 {
 private:
-	ZP0 _r0;
-	ZP1 _r1;
-	ZP2 _r2;
-	ZP3 _r3;
+	ZP0 _r0; ZP1 _r1; ZP2 _r2; ZP3 _r3;
 
 private:
 	explicit RNS_K(const ZP0 & r0, const ZP1 & r1, const ZP2 & r2, const ZP3 & r3) : _r0(r0), _r1(r1), _r2(r2), _r3(r3) {}
@@ -260,7 +319,6 @@ private:
 		static const ZP0 INVP3_P0 = ZP0(P3).toMonty().invert();
 		static const ZP0 INVP2_P0 = ZP0(P2).toMonty().invert();
 		static const ZP0 INVP1_P0 = ZP0(P1).toMonty().invert();
-		static const uint_64 P34 = P2 * (uint_64)(P3);
 
 		// convert to mixed-radix representation
 		const uint_32 u3 = r3.get();
@@ -269,15 +327,16 @@ private:
 		const uint_32 u0 = ((((r0 - ZP0(u3)) * INVP3_P0 - ZP0(u2)) * INVP2_P0 - ZP0(u1)) * INVP1_P0).get();
 		const int_32 i0 = (u0 > P0 / 2) ? (int_32)(u0 - P0) : (int_32)(u0);
 
-		const uint_64 u34 = u3 + (uint_64)(P3) * u2;
-		const int_64 i12 = (int_64)(u1) + (int_64)(P1) * i0;
-		return _big_add_u64(_big_mul_u64i64(P34, i12), u34);
+		const uint_64 u23 = u3 + (uint_64)(P3) * u2;
+		const int_64 i01 = (int_64)(u1) + (int_64)(P1) * i0;
+		return _big_add_u64(_big_mul_u64i64(P2 * (uint_64)(P3), i01), u23);
 	}
 
 public:
 	RNS_K() {}
 	explicit RNS_K(const uint_32 n) : _r0(n), _r1(n), _r2(n), _r3(n) {}
-	explicit RNS_K(const uint_32 n0, const uint_32 n1, const uint_32 n2, const uint_32 n3) : _r0(n0), _r1(n1), _r2(n2), _r3(n3) {}
+	explicit RNS_K(const uint_32 n[4]) : _r0(n[0]), _r1(n[1]), _r2(n[2]), _r3(n[3]) {}
+	explicit RNS_K(const pck_type & r) : _r0(r.r[0]), _r1(r.r[1]) {} // PCK_FACTOR = 2
 
 	static RNS_K one() { return RNS_K(ZP0::one(), ZP1::one(), ZP2::one(), ZP3::one()); }
 
@@ -289,6 +348,8 @@ public:
 		if (i == 3) return _r3.get();
 		return 0;
 	}
+
+	pck_type get_pck() const { pck_type r; r.r[0] = _r0.get(); r.r[1] = _r1.get(); return r; } // PCK_FACTOR = 2
 
 	big_type getK_i() const { return garner4(_r0, _r1, _r2, _r3); }
 
@@ -319,19 +380,113 @@ public:
 	static RNS_K primroot_n(const int ln) { return RNS_K(ZP0::primroot_n(ln), ZP1::primroot_n(ln), ZP2::primroot_n(ln), ZP3::primroot_n(ln)); }
 	static RNS_K norm(const int ln) { return RNS_K(ZP0::norm(ln), ZP1::norm(ln), ZP2::norm(ln), ZP3::norm(ln)); }
 
-	void encode(const uint32_t & rhs, const RNS_K & base) { *this *= base; *this += RNS_K(rhs); }
-
-	// void display() const { std::cout << "(" << _r1.get() << ", " << _r2.get() << ", " << _r3.get() << ", " << _r4.get() << ")"; }
+	RNS_K encode(const uint32_t & rhs, const RNS_K & base) const { RNS_K r = *this; r *= base; r += RNS_K(rhs); return r; }
 };
+
+#elif (PRM_COUNT == 5)
+
+class RNS_K
+{
+private:
+	ZP0 _r0; ZP1 _r1; ZP2 _r2; ZP3 _r3; ZP4 _r4;
+	
+private:
+	explicit RNS_K(const ZP0 & r0, const ZP1 & r1, const ZP2 & r2, const ZP3 & r3, const ZP4 & r4) : _r0(r0), _r1(r1), _r2(r2), _r3(r3), _r4(r4) {}
+
+	// Chinese remainder theorem
+	static big_type garner5(const ZP0 & r0, const ZP1 & r1, const ZP2 & r2, const ZP3 & r3, const ZP4 & r4)
+	{
+		static const uint_32 P0 = ZP0::P(), P1 = ZP1::P(), P2 = ZP2::P(), P3 = ZP3::P(), P4 = ZP4::P();
+		// we must have P4 < P3 < P2 < P1
+		static const ZP3 INVP4_P3 = ZP3(P4).toMonty().invert();
+		static const ZP2 INVP4_P2 = ZP2(P4).toMonty().invert();
+		static const ZP2 INVP3_P2 = ZP2(P3).toMonty().invert();
+		static const ZP1 INVP4_P1 = ZP1(P4).toMonty().invert();
+		static const ZP1 INVP3_P1 = ZP1(P3).toMonty().invert();
+		static const ZP1 INVP2_P1 = ZP1(P2).toMonty().invert();
+		static const ZP0 INVP4_P0 = ZP0(P4).toMonty().invert();
+		static const ZP0 INVP3_P0 = ZP0(P3).toMonty().invert();
+		static const ZP0 INVP2_P0 = ZP0(P2).toMonty().invert();
+		static const ZP0 INVP1_P0 = ZP0(P1).toMonty().invert();
+
+		// convert to mixed-radix representation, we must have P4 < P3 < P2 < P1 < P0
+		const uint_32 u4 = r4.get();
+		const uint_32 u3 = ((r3 - ZP3(u4)) * INVP4_P3).get();
+		const uint_32 u2 = (((r2 - ZP2(u4)) * INVP4_P2 - ZP2(u3)) * INVP3_P2).get();
+		const uint_32 u1 = ((((r1 - ZP1(u4)) * INVP4_P1 - ZP1(u3)) * INVP3_P1 - ZP1(u2)) * INVP2_P1).get();
+		const uint_32 u0 = (((((r0 - ZP0(u4)) * INVP4_P0 - ZP0(u3)) * INVP3_P0 - ZP0(u2)) * INVP2_P0  - ZP0(u1)) * INVP1_P0).get();
+		const int_32 i0 = (u0 > P0 / 2) ? (int_32)(u0 - P0) : (int_32)(u0);
+
+		const uint_64 u23 = u3 + (uint_64)(P3) * u2;
+		const int_64 i01 = (int_64)(u1) + (int_64)(P1) * i0;
+		const big_type i0123 = _big_add_u64(_big_mul_u64i64(P2 * (uint_64)(P3), i01), u23);
+		return _big_add_u64(big_mul_u32(i0123, P4), u4);
+	}
+
+public:
+	RNS_K() {}
+	explicit RNS_K(const uint_32 n) : _r0(n), _r1(n), _r2(n), _r3(n), _r4(n) {}
+	explicit RNS_K(const uint_32 n[5]) : _r0(n[0]), _r1(n[1]), _r2(n[2]), _r3(n[3]), _r4(n[4]) {}
+	explicit RNS_K(const pck_type & r) : _r0(r.r[0]), _r1(r.r[1]), _r2(r.r[2]), _r3(r.r[3]) {} // PCK_FACTOR = 4
+
+	static RNS_K one() { return RNS_K(ZP0::one(), ZP1::one(), ZP2::one(), ZP3::one(), ZP4::one()); }
+
+	uint_32 get_r(const size_t i) const
+	{
+		if (i == 0) return _r0.get();
+		if (i == 1) return _r1.get();
+		if (i == 2) return _r2.get();
+		if (i == 3) return _r3.get();
+		if (i == 4) return _r4.get();
+		return 0;
+	}
+
+	pck_type get_pck() const { pck_type r; r.r[0] = _r0.get(); r.r[1] = _r1.get(); r.r[2] = _r2.get(); r.r[3] = _r3.get(); return r; } // PCK_FACTOR = 4
+
+	big_type getK_i() const { return garner5(_r0, _r1, _r2, _r3, _r4); }
+
+	RNS_K & set_i32(const int_32 i) { _r0.set_i32(i); _r1.set_i32(i); _r2.set_i32(i); _r3.set_i32(i);  _r4.set_i32(i); return *this; }
+
+	// Conversion into Montgomery form
+	RNS_K toMonty() const { return RNS_K(_r0.toMonty(), _r1.toMonty(), _r2.toMonty(), _r3.toMonty(), _r4.toMonty()); }
+
+	bool operator==(const RNS_K & rhs) const { return (_r0 == rhs._r0) && (_r1 == rhs._r1) && (_r2 == rhs._r2) && (_r3 == rhs._r3) && (_r4 == rhs._r4); }
+	bool operator!=(const RNS_K & rhs) const { return !(*this == rhs); }
+
+	RNS_K & operator+=(const RNS_K & rhs) { _r0 += rhs._r0; _r1 += rhs._r1; _r2 += rhs._r2; _r3 += rhs._r3; _r4 += rhs._r4; return *this; }
+	RNS_K & operator-=(const RNS_K & rhs) { _r0 -= rhs._r0; _r1 -= rhs._r1; _r2 -= rhs._r2; _r3 -= rhs._r3; _r4 -= rhs._r4; return *this; }
+	RNS_K & operator*=(const RNS_K & rhs) { _r0 *= rhs._r0; _r1 *= rhs._r1; _r2 *= rhs._r2; _r3 *= rhs._r3; _r4 *= rhs._r4; return *this; }
+
+	RNS_K operator+(const RNS_K & rhs) const { RNS_K r = *this; r += rhs; return r; }
+	RNS_K operator-(const RNS_K & rhs) const { RNS_K r = *this; r -= rhs; return r; }
+	RNS_K operator*(const RNS_K & rhs) const { RNS_K r = *this; r *= rhs; return r; }
+
+	RNS_K mul_Q() const { return RNS_K(_r0.mul_Q(), _r1.mul_Q(), _r2.mul_Q(), _r3.mul_Q(), _r4.mul_Q()); }
+	RNS_K mul_const(const RNS_K & rhs, const RNS_K & rhs_Q) const
+	{
+		return RNS_K(_r0.mul_const(rhs._r0, rhs_Q._r0), _r1.mul_const(rhs._r1, rhs_Q._r1),
+		             _r2.mul_const(rhs._r2, rhs_Q._r2), _r3.mul_const(rhs._r3, rhs_Q._r3),
+		             _r4.mul_const(rhs._r4, rhs_Q._r4));
+	}
+
+	RNS_K invert() const { return RNS_K(_r0.invert(), _r1.invert(), _r2.invert(), _r3.invert(), _r4.invert()); }
+	static RNS_K primroot_n(const int ln) { return RNS_K(ZP0::primroot_n(ln), ZP1::primroot_n(ln), ZP2::primroot_n(ln), ZP3::primroot_n(ln), ZP4::primroot_n(ln)); }
+	static RNS_K norm(const int ln) { return RNS_K(ZP0::norm(ln), ZP1::norm(ln), ZP2::norm(ln), ZP3::norm(ln), ZP4::norm(ln)); }
+
+	RNS_K encode(const uint32_t & rhs, const RNS_K & base) const { RNS_K r = *this; r *= base; r += RNS_K(rhs); return r; }
+};
+
+#endif
+
+#if (PCK_FACTOR == 2)
 
 class RNS_S
 {
 public:
-	typedef int_64 big_type;
+	typedef int_64 small_type;
 
 private:
-	ZP0 _r0;
-	ZP1 _r1;
+	ZP0 _r0; ZP1 _r1;
 
 private:
 	// Chinese remainder theorem
@@ -353,8 +508,52 @@ public:
 	explicit RNS_S(const uint_32 n) : _r0(n), _r1(n) {}
 	explicit RNS_S(const uint_32 * const n) : _r0(n[0]), _r1(n[1]) {}
 
-	big_type getS_i() const { return garner2(_r0, _r1); }
+	small_type getS_i() const { return garner2(_r0, _r1); }
 };
+
+#elif (PCK_FACTOR == 4)
+
+class RNS_S
+{
+public:
+	typedef __int128_t small_type;
+
+private:
+	ZP0 _r0; ZP1 _r1; ZP2 _r2; ZP3 _r3;
+
+private:
+	// Chinese remainder theorem
+	static __int128_t garner4(const ZP0 & r0, const ZP1 & r1, const ZP2 & r2, const ZP3 & r3)
+	{
+		static const uint_32 P0 = ZP0::P(), P1 = ZP1::P(), P2 = ZP2::P(), P3 = ZP3::P();
+		static const ZP2 INVP3_P2 = ZP2(P3).toMonty().invert();
+		static const ZP1 INVP3_P1 = ZP1(P3).toMonty().invert();
+		static const ZP1 INVP2_P1 = ZP1(P2).toMonty().invert();
+		static const ZP0 INVP3_P0 = ZP0(P3).toMonty().invert();
+		static const ZP0 INVP2_P0 = ZP0(P2).toMonty().invert();
+		static const ZP0 INVP1_P0 = ZP0(P1).toMonty().invert();
+
+		// convert to mixed-radix representation
+		const uint_32 u3 = r3.get();
+		const uint_32 u2 = ((r2 - ZP2(u3)) * INVP3_P2).get();
+		const uint_32 u1 = (((r1 - ZP1(u3)) * INVP3_P1 - ZP1(u2)) * INVP2_P1).get();
+		const uint_32 u0 = ((((r0 - ZP0(u3)) * INVP3_P0 - ZP0(u2)) * INVP2_P0 - ZP0(u1)) * INVP1_P0).get();
+		const int_32 i0 = (u0 > P0 / 2) ? (int_32)(u0 - P0) : (int_32)(u0);
+
+		const uint_64 u23 = u3 + (uint_64)(P3) * u2;
+		const int_64 i01 = (int_64)(u1) + (int_64)(P1) * i0;
+		return (__int128_t)(P2 * (uint_64)(P3)) * i01 + u23;
+	}
+
+public:
+	RNS_S() {}
+	explicit RNS_S(const uint_32 n) : _r0(n), _r1(n), _r2(n), _r3(n) {}
+	explicit RNS_S(const uint_32 * const n) : _r0(n[0]), _r1(n[1]), _r2(n[2]), _r3(n[3]) {}
+
+	small_type getS_i() const { return garner4(_r0, _r1, _r2, _r3); }
+};
+
+#endif
 
 class transformCPU : public transform
 {
@@ -757,7 +956,7 @@ private:
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
 		const uint_32 base = 1u << lbase;
-		const size_t prm_count = _prm_count, pck_factor = _pck_factor;
+		const size_t pck_factor = _pck_factor;
 		uint_32 * const buf = _buf;
 
 		const size_t x_size = mpz_size(x);
@@ -773,15 +972,12 @@ private:
 			}
 		}
 
-		if (prm_count == 4)
+		const RNS_K rbase = RNS_K(1u << lbase).toMonty();
+		for (size_t i = 0; i < n; ++i)
 		{
-			const RNS_K rbase4 = RNS_K(1u << lbase).toMonty();
-			for (size_t i = 0; i < n; ++i)
-			{
-				size_t j = pck_factor - 1;
-				RNS_K r = RNS_K(buf[j * n + i]); while (j > 0) {--j; r.encode(buf[j * n + i], rbase4); }
-				y[i] = r;
-			}
+			size_t j = pck_factor - 1;
+			RNS_K r = RNS_K(buf[j * n + i]); while (j > 0) {--j; r = r.encode(buf[j * n + i], rbase); }
+			y[i] = r;
 		}
 	}
 
@@ -806,17 +1002,39 @@ private:
 		if (pck_factor == 2)
 		{
 			const uint_64 base2 = base * uint_64(base);
-			RNS_S::big_type f = 0;
+			RNS_S::small_type f = 0;
 			size_t bit_index = 0;
 			for (size_t i = 0; i < n; ++i)
 			{
-				uint_32 u[pck_factor]; for (size_t l = 0; l < pck_factor; ++l) u[l] = buf[l * n + i];
+				uint_32 u[PCK_FACTOR]; for (size_t l = 0; l < PCK_FACTOR; ++l) u[l] = buf[l * n + i];
 				f += RNS_S(u).getS_i();
 
 				const uint_64 r = (uint_64)(f) & (base2 - 1);
 				f >>= 2 * lbase;
 
 				write_word(y_ptr, bit_index, r);
+				bit_index += size_t(2 * lbase);
+			}
+			fr = long(f);
+		}
+		else if (pck_factor == 4)
+		{
+			const uint_64 base2 = base * uint_64(base);
+			RNS_S::small_type f = 0;
+			size_t bit_index = 0;
+			for (size_t i = 0; i < n; ++i)
+			{
+				uint_32 u[PCK_FACTOR]; for (size_t l = 0; l < PCK_FACTOR; ++l) u[l] = buf[l * n + i];
+				f += RNS_S(u).getS_i();
+
+				const uint_64 r0 = (uint_64)(f) & (base2 - 1);
+				f >>= 2 * lbase;
+				const uint_64 r1 = (uint_64)(f) & (base2 - 1);
+				f >>= 2 * lbase;
+
+				write_word(y_ptr, bit_index, r0);
+				bit_index += size_t(2 * lbase);
+				write_word(y_ptr, bit_index, r1);
 				bit_index += size_t(2 * lbase);
 			}
 			fr = long(f);
@@ -828,6 +1046,7 @@ private:
 
 		if (fr != 0)
 		{
+			std::cout << "warning" << std::endl;
 			mpz_t t; mpz_init_set_si(t, fr);
 			mpz_mul_2exp(t, t, mp_bitcnt_t(lbase_pck) << _ln);
 			mpz_add(y, y, t);
@@ -881,6 +1100,68 @@ private:
 		else if (s0 == n / 2) mul2x4(y, x, w, n / 8);
 	}
 
+#if (PCK_FACTOR == 2)
+
+	pck_type extract_shift(big_type * const f, const int lbase, const uint_32 base, const uint_64 base2)
+	{
+		const uint_64 r01 = (*f).l[0] & (base2 - 1);
+		pck_type r; r.r[0] = (uint_32)(r01) & (base - 1); r.r[1] = (uint_32)(r01 >> lbase);
+		(*f) = big_rshift((*f), 2 * lbase);
+		return r;
+	}
+
+	RNS_K extract_encode(big_type * const f, const int lbase, const uint_32 base, const uint_64 base2, const RNS_K & rbase)
+	{
+		const pck_type r = extract_shift(f, lbase, base, base2);
+		int_32 r1 = (int_32)(r.r[1]);
+		if (r1 >= (int_32)(base / 2)) { r1 -= (int_32)(base); (*f) = big_inc((*f)); }	// balanced
+		const RNS_K x = RNS_K().set_i32(r1);
+		return x.encode(r.r[0], rbase);
+	}
+
+	RNS_K extract_encode_last(const big_type & f, const int lbase, const uint_32 base, const uint_64, const RNS_K & rbase)
+	{
+		const int_64 r01 = (int_64)(f.l[0]);
+		const uint_32 r0 = (uint_32)(r01) & (base - 1); const int_32 r1 = (int_32)(r01 >> lbase);
+		const RNS_K x = RNS_K().set_i32(r1);
+		return x.encode(r0, rbase);
+	}
+
+#elif (PCK_FACTOR == 4)
+
+	pck_type extract_shift(big_type * const f, const int lbase, const uint_32 base, const uint_64 base2)
+	{
+		const uint_64 r01 = (*f).l[0] & (base2 - 1);
+		pck_type r; r.r[0] = (uint_32)(r01) & (base - 1); r.r[1] = (uint_32)(r01 >> lbase);
+		(*f) = big_rshift((*f), 2 * lbase);
+		const uint_64 r23 = (*f).l[0] & (base2 - 1);
+		r.r[2] = (uint_32)(r23) & (base - 1); r.r[3] = (uint_32)(r23 >> lbase);
+		(*f) = big_rshift((*f), 2 * lbase);
+		return r;
+	}
+
+	RNS_K extract_encode(big_type * const f, const int lbase, const uint_32 base, const uint_64 base2, const RNS_K & rbase)
+	{
+		const pck_type r = extract_shift(f, lbase, base, base2);
+		int_32 r3 = (int_32)(r.r[3]);
+		if (r3 >= (int_32)(base / 2)) { r3 -= (int_32)(base); (*f) = big_inc((*f)); }	// balanced
+		RNS_K x = RNS_K().set_i32(r3); x = x.encode(r.r[2], rbase); x = x.encode(r.r[1], rbase);
+		return x.encode(r.r[0], rbase);
+	}
+
+	RNS_K extract_encode_last(const big_type & f, const int lbase, const uint_32 base, const uint_64 base2, const RNS_K & rbase)
+	{
+		const uint_64 r01 = f.l[0] & (base2 - 1);
+		const uint_32 r0 = (uint_32)(r01) & (base - 1), r1 = (uint_32)(r01 >> lbase);
+		const big_type f23 = big_rshift(f, 2 * lbase);
+		const int_64 r23 = (int_64)(f23.l[0]);
+		const uint_32 r2 = (uint_32)(r23) & (base - 1); const int_32 r3 = (int_32)(r23 >> lbase);
+		RNS_K x = RNS_K().set_i32(r3); x = x.encode(r2, rbase); x = x.encode(r1, rbase);
+		return x.encode(r0, rbase);
+	}
+
+#endif
+
 	void carry_mul_sub(RNS_K * const x, const RNS_K * const y, big_type * const carry, const uint_32 a)
 	{
 		const size_t n = size_t(1) << _ln;
@@ -888,7 +1169,7 @@ private:
 		const RNS_K & norm = _norm;
 		const uint_32 base = 1u << lbase;
 		const uint_64 base2 = (uint_64)(1) << (2 * lbase);
-		const RNS_K rbase = RNS_K(base).toMonty();
+		// const RNS_K rbase = RNS_K(base).toMonty();
 	
 		for (size_t i = 0; i < n / CARRY_LENGTH; ++i)
 		{
@@ -897,15 +1178,12 @@ private:
 			{
 				const size_t k = i * CARRY_LENGTH + j;
 				// norm is not converted into Montgomery form such that x[i] * norm is converted out of MF
-				f = big_add(f, big_mul_u31((x[k] * norm).getK_i(), a));
+				f = big_add(f, big_mul_u32((x[k] * norm).getK_i(), a));
 				if (y != nullptr) f = big_sub(f, y[k].getK_i());	// TODO getS_i
-				const uint_64 r01 = f.l[0] & (base2 - 1);
-				const uint_32 r0 = (uint_32)(r01) & (base - 1), r1 = (uint_32)(r01 >> lbase);
-				f = big_rshift(f, 2 * lbase);
-
-				RNS_K r = RNS_K(r1); r.encode(r0, rbase);
-				x[k] = r;
+				const pck_type r = extract_shift(&f, lbase, base, base2);
+				x[k] = RNS_K(r);
 			}
+
 			carry[i] = f;
 		}
 	}
@@ -926,24 +1204,14 @@ private:
 			for (size_t j = 0; j < CARRY_LENGTH - 1; ++j)
 			{
 				const size_t k = i * CARRY_LENGTH + j;
-				f = big_add(f, x[k].getK_i());	// x[k] >= 0
-				const uint_64 r01 = f.l[0] & (base2 - 1);
-				const uint_32 r0 = (uint_32)(r01) & (base - 1); int_32 r1 = (int_32)(r01 >> lbase);
-				f = big_rshift(f, 2 * lbase);
-
-#if defined(BALANCED)
-				if (r1 >= (int_32)(base / 2)) { r1 -= (int_32)(base); f = big_inc(f); }
-#endif
-
-				RNS_K r = RNS_K().set_i32(r1); r.encode(r0, rbase);
-				x[k] = r;
+				f = big_add_pck(f, x[k].get_pck(), lbase);	// x[k] >= 0
+				x[k] = extract_encode(&f, lbase, base, base2, rbase);
 			}
+
 			const size_t k = i * CARRY_LENGTH + CARRY_LENGTH - 1;
-			f = big_add(f, x[k].getK_i());	// x[k] >= 0
-			const int_64 r01 = (int_64)(f.l[0]);
-			const uint_32 r0 = (uint_32)(r01) & (base - 1); const int_32 r1 = (int_32)(r01 >> lbase);
-			RNS_K r = RNS_K().set_i32(r1); r.encode(r0, rbase);
-			x[k] = r;
+			const pck_type r = x[k].get_pck();
+			f = big_add_pck(f, r, lbase);	// x[k] >= 0
+			x[k] = extract_encode_last(f, lbase, base, base2, rbase);
 		}
 	}
 
@@ -953,27 +1221,28 @@ private:
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
 		const size_t pck_factor = _pck_factor;
-		const int_64 base2 = int_64(1) << (2 * lbase);
+		const RNS_S::small_type base_pck = RNS_S::small_type(1) << (int(pck_factor) * lbase);
 		const RNS_K base = RNS_K(1u << lbase), rbase = base.toMonty();
-		const RNS_K rbase2 = base * rbase, rbase2_m1 = rbase2 - RNS_K(1);
+		RNS_K rbase_pck = base; for (size_t l = 1; l < pck_factor; ++l) rbase_pck *= rbase;
+		const RNS_K rbase_pck_m1 = rbase_pck - RNS_K(1);
 
 #if defined(CHECK_THEOREM)
 		static size_t i_max = 2;
 #else
 		(void)who;
 #endif
-		if (x[n - 1] == rbase2_m1)
+		if (x[n - 1] == rbase_pck_m1)
 		{
-			size_t i = 2; for (; i < n; ++i) { if (x[n - i] != rbase2_m1) break; }
+			size_t i = 2; for (; i < n; ++i) { if (x[n - i] != rbase_pck_m1) break; }
 #if defined(CHECK_THEOREM)
 			if (i > i_max) { i_max = i; std::cout << "fix_base " << who << ": i = " << i << " / " << n << std::endl; }
 #endif
-			uint_32 hi_i[pck_factor]; for (size_t l = 0; l < pck_factor; ++l) hi_i[l] = x[n - i].get_r(l);
-			if (RNS_S(hi_i).getS_i() >= base2)	// >= base^n
+			uint_32 hi_i[PCK_FACTOR]; for (size_t l = 0; l < PCK_FACTOR; ++l) hi_i[l] = x[n - i].get_r(l);
+			if (RNS_S(hi_i).getS_i() >= base_pck)	// >= base^n
 			{
-				x[n - i] -= rbase2;
+				x[n - i] -= rbase_pck;
 				for (size_t j = i - 1; j >= 2; --j) x[n - j] = RNS_K(0u);
-				x[n - 1] = rbase2;
+				x[n - 1] = rbase_pck;
 			}
 		}
 	}
@@ -983,15 +1252,13 @@ private:
 		const size_t n = size_t(1) << _ln;
 		const int lbase = _lbase;
 		const size_t pck_factor = _pck_factor;
-		const int_64 base2 = int_64(1) << (2 * lbase);
 		const RNS_K base = RNS_K(1u << lbase), rbase = base.toMonty();
-		const RNS_K rbase2 = base * rbase;
+		RNS_K rbase_pck = base; for (size_t l = 1; l < pck_factor; ++l) rbase_pck *= rbase;
 
-		uint_32 hi[pck_factor]; for (size_t l = 0; l < pck_factor; ++l) hi[l] = x[n - 1].get_r(l);
-		if (RNS_S(hi).getS_i() >= base2)	// >= base^n
+		if (big_ge_pow_2_s(x[n - 1].getK_i(), int(pck_factor) * lbase))	// x >= base^n => x[N_SZ - 1] >= BASE^PCK_FACTOR
 		{
 			// - R or Q
-			x[n - 1] -= rbase2;
+			x[n - 1] -= rbase_pck;
 			x[0] -= RNS_K().set_i32(l0);
 		}
 	}
@@ -1001,17 +1268,17 @@ private:
 		const size_t n = size_t(1) << _ln;
 		const RNS_K base = RNS_K(1u << _lbase), rbase = base.toMonty();
 		const size_t pck_factor = _pck_factor;
-		const RNS_K rbase2 = base * rbase;
+		RNS_K rbase_pck = base; for (size_t l = 1; l < pck_factor; ++l) rbase_pck *= rbase;
 
 		for (size_t i = 0; i < n; ++i)
 		{
-			uint_32 hi_i[pck_factor]; for (size_t l = 0; l < pck_factor; ++l) hi_i[l] = x[n - 1 - i].get_r(l);
+			uint_32 hi_i[PCK_FACTOR]; for (size_t l = 0; l < PCK_FACTOR; ++l) hi_i[l] = x[n - 1 - i].get_r(l);
 			const int_64 u = RNS_S(hi_i).getS_i();
 			if (u > 0) return;
 			if (u < 0)
 			{
 				// + R or Q
-				x[n - 1] += rbase2;
+				x[n - 1] += rbase_pck;
 				x[0] += RNS_K().set_i32(l0);
 				return;
 			}
@@ -1079,14 +1346,6 @@ private:
 	}
 
 	// Modular arithmetic
-
-	// void display(const RNS * const x, const char * const str) const
-	// {
-	// 	const size_t n = size_t(1) << _ln;
-	// 	std::cout << str << ": ";
-	// 	for (size_t i = 0; i < n; ++i) x[i].display();
-	// 	std::cout << std::endl;
-	// }
 
 	void square_mul_mod_R(RNS_K * const y, const RNS_K * const x, const uint_32 a)
 	{
@@ -1201,15 +1460,19 @@ public:
 	bool read_checkpoint(file & cfile) override
 	{
 		const size_t n = size_t(1) << _ln;
+		const size_t prm_count = _prm_count;
+		uint_32 * const buf = _buf;
 
-		uint_32 * const buf = new uint_32[4 * n];
 		for (size_t j = 0; j < 2; ++j)
 		{
-			if (!cfile.read(reinterpret_cast<char *>(buf), 4 * n * sizeof(uint_32))) { delete[] buf; return false; }
+			if (!cfile.read(reinterpret_cast<char *>(buf), prm_count * n * sizeof(uint_32))) return false;
 			RNS_K * const reg = _reg[j];
-			for (size_t i = 0; i < n; ++i) reg[i] = RNS_K(buf[0 * n + i], buf[1 * n + i], buf[2 * n + i], buf[3 * n + i]);
+			for (size_t i = 0; i < n; ++i)
+			{
+				uint_32 u[PRM_COUNT]; for (size_t k = 0; k < PRM_COUNT; ++k) u[k] = buf[k * n + i];
+				reg[i] = RNS_K(u);
+			}
 		}
-		delete[] buf;
 
 		return true;
 	}
@@ -1218,8 +1481,8 @@ public:
 	{
 		const size_t n = size_t(1) << _ln;
 		const size_t prm_count = _prm_count;
+		uint_32 * const buf = _buf;
 
-		uint_32 * const buf = new uint_32[4 * n];
 		for (size_t j = 0; j < 2; ++j)
 		{
 			const RNS_K * const reg = _reg[j];
@@ -1228,15 +1491,38 @@ public:
 				const RNS_K & r = reg[i];
 				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
 			}
-			if (!cfile.write(reinterpret_cast<const char *>(buf), 4 * n * sizeof(uint_32))) break;
+			if (!cfile.write(reinterpret_cast<const char *>(buf), prm_count * n * sizeof(uint_32))) break;
 		}
-		delete[] buf;
+	}
+
+	static void get_n_base(int & rln, int & rlbase, const int pck_factor, const double log2_16aN, const double log2_p_2a)
+	{
+		for (int lbase = 31; lbase >= 2; --lbase)
+		{
+			// log2(base^n) = lbase * n
+			int ln = 4; while (double(lbase * pck_factor) * (1 << ln) < log2_16aN) ++ln;
+
+			// A necessary condition is a * n * (base - 1)^2 < Prod_i(Pi) / 2
+			const int log2_base = lbase * pck_factor;
+			if (ln + 2 * log2_base < log2_p_2a)
+			{
+				rln = ln;
+				rlbase = lbase;
+				break;
+			}
+		}
+	}
+
+	static constexpr size_t get_s(const size_t K)
+	{
+		int s = -1; for (size_t k = K - 1; k != 0; k /= 2) ++s;
+		return size_t(1) << s;
 	}
 
 public:
 	transformCPU(const mpz_t & N, const int32_t a) : transform()
 	{
-		_prm_count = 4; _pck_factor = 2;
+		_prm_count = PRM_COUNT; _pck_factor = PCK_FACTOR;
 
 		mpz_t R, t; mpz_inits(_Nz, R, t, nullptr);
 
@@ -1244,24 +1530,13 @@ public:
 		long e_n; const double m_n = mpz_get_d_2exp(&e_n, N);
 		const double log2_16aN = std::log2(16.0 * a) + std::log2(m_n) + e_n;
 
-		const double p_2a = ZP0::P() * double(ZP1::P()) * double(ZP2::P()) * double(ZP3::P()) / 2 / a;
-		int ln;
-		for (int lbase2 = 62; lbase2 >= 2; lbase2 -= 2)
-		{
-			// log2(base^n) = lbase * n
-			ln = 4; while (double(lbase2) * (1 << ln) < log2_16aN) ++ln;
+		double log2_p_2a = std::log2(double(ZP0::P())) + std::log2(double(ZP1::P())) + std::log2(double(ZP2::P())) + std::log2(double(ZP3::P())) - std::log2(2.0 * a);
+		if (PRM_COUNT == 5) log2_p_2a += std::log2(double(ZP4::P()));
+		int ln = 0; get_n_base(ln, _lbase, _pck_factor, log2_16aN, log2_p_2a);
+		_ln = ln;
 
-			// A necessary condition is a * n * (base - 1)^2 < Prod_i(Pi) / 2
-			const double dbase2 = double(uint64_t(1) << lbase2);
-			if ((1 << ln) * (dbase2 - 1) * (dbase2 - 1) < p_2a)
-			{
-				_ln = ln;
-				_lbase = lbase2 / 2;
-				break;
-			}
-		}
 		const size_t n = size_t(1) << ln;
-		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase), lbase2 = 2 * lbase;
+		const mp_bitcnt_t lbase = mp_bitcnt_t(_lbase), lbase_pck = mp_bitcnt_t(_pck_factor) * mp_bitcnt_t(lbase);
 		_norm = RNS_K::norm(ln - 1);
 
 		_buf = new uint32_t[_prm_count * n];
@@ -1281,7 +1556,7 @@ public:
 		long eN; const double mN = mpz_get_d_2exp(&eN, N);
 		_logN = std::log2(mN) + eN;
 #endif
-		mpz_set_ui(R, 1); mpz_mul_2exp(R, R, lbase2 << ln); mpz_sub_ui(R, R, 1);
+		mpz_set_ui(R, 1); mpz_mul_2exp(R, R, lbase_pck << ln); mpz_sub_ui(R, R, 1);
 		if (mpz_invert(t, N, R) == 0)
 		{
 			mpz_gcd(_Nz, N, R);
@@ -1336,7 +1611,7 @@ public:
 	std::string get_info_short() const override
 	{
 		const size_t n = size_t(1) << _ln;
-		std::ostringstream ss; ss << "length " << n << "x2x" << _lbase << " bits";
+		std::ostringstream ss; ss << _prm_count << "-prime NTT of length " << n << ", packed-base = 2^{" << _pck_factor << "x" << _lbase << "}";
 		return (ss.str());
 	}
 
