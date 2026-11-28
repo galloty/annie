@@ -171,15 +171,12 @@ protected:
 	RNS & _mul(const RNS & rhs) { for (size_t k = 0; k < SIZE; ++k) _r[k] = Mod::mul(_r[k], rhs._r[k], k); return *this; }
 
 	RNS & _toMonty() { for (size_t k = 0; k < SIZE; ++k) _r[k] = Mod::toMonty(_r[k], k); return *this; }
-	RNS & _norm(const int ln) { for (size_t k = 0; k < SIZE; ++k) _r[k] = Mod::norm(ln, k); return *this; }
 
 public:
-	RNS() {}
 	explicit RNS(const uint_32 n) { for (size_t k = 0; k < SIZE; ++k) _r[k] = ZP(n); }
 	explicit RNS(const uint_32 * const n) { for (size_t k = 0; k < SIZE; ++k) _r[k] = ZP(n[k]); }
 
 	const ZP & get_r(const size_t k) const { return _r[k]; }
-
 };
 
 class RNS1 : public RNS<1>
@@ -192,9 +189,7 @@ private:
 	finline int_32 garner1() const { return Mod::get_i32(_r[0], 0); }
 
 public:
-	RNS1() {}
 	explicit RNS1(const uint_32 n) : RNS(n) {}
-	explicit RNS1(const uint_32 * const n) : RNS(n) {}
 
 	big_type getS_i() const { return big_type(garner1()); }
 };
@@ -220,32 +215,10 @@ private:
 	}
 
 public:
-	RNS2() {}
 	explicit RNS2(const uint_32 n) : RNS(n) {}
 	explicit RNS2(const uint_32 * const n) : RNS(n) {}
 
 	big_type getS_i() const { return garner2(); }
-};
-
-class RNS3 : public RNS<3>
-{
-public:
-	RNS3() {}
-	explicit RNS3(const uint_32 n) : RNS(n) {}
-	explicit RNS3(const uint_32 * const n) : RNS(n) {}
-
-	RNS3 & operator+=(const RNS3 & rhs) { _add(rhs); return *this; }
-	RNS3 & operator-=(const RNS3 & rhs) { _sub(rhs); return *this; }
-	RNS3 & operator*=(const RNS3 & rhs) { _mul(rhs); return *this; }
-
-	RNS3 operator+(const RNS3 & rhs) const { RNS3 r = *this; r += rhs; return r; }
-	RNS3 operator-(const RNS3 & rhs) const { RNS3 r = *this; r -= rhs; return r; }
-	RNS3 operator*(const RNS3 & rhs) const { RNS3 r = *this; r *= rhs; return r; }
-
-	RNS3 toMonty() const { RNS3 r = *this; r._toMonty(); return r; }
-	static RNS3 norm(const int ln) { RNS3 r; r._norm(ln); return r; }
-
-	void encode(const ZP & rhs, const RNS3 & base) { *this *= base; *this += RNS3(rhs); }
 };
 
 class RNS4 : public RNS<4>
@@ -253,6 +226,7 @@ class RNS4 : public RNS<4>
 public:
 	typedef __int128_t big_type;
 
+private:
 	finline __int128_t garner4() const
 	{
 		static const uint_32 P0 = Mod::P[0], P1 = Mod::P[1], P2 = Mod::P[2], P3 = Mod::P[3];
@@ -276,46 +250,38 @@ public:
 	}
 
 public:
-	RNS4() {}
 	explicit RNS4(const uint_32 n) : RNS(n) {}
 	explicit RNS4(const uint_32 * const n) : RNS(n) {}
 
-	RNS4 & operator+=(const RNS4 & rhs) { _add(rhs); return *this; }
-	RNS4 & operator-=(const RNS4 & rhs) { _sub(rhs); return *this; }
-	RNS4 & operator*=(const RNS4 & rhs) { _mul(rhs); return *this; }
-
-	RNS4 operator+(const RNS4 & rhs) const { RNS4 r = *this; r += rhs; return r; }
-	RNS4 operator-(const RNS4 & rhs) const { RNS4 r = *this; r -= rhs; return r; }
-	RNS4 operator*(const RNS4 & rhs) const { RNS4 r = *this; r *= rhs; return r; }
-
 	RNS4 toMonty() const { RNS4 r = *this; r._toMonty(); return r; }
-	static RNS4 norm(const int ln) { RNS4 r; r._norm(ln); return r; }
-
-	void encode(const ZP & rhs, const RNS4 & base) { *this *= base; *this += RNS4(rhs); }
+	void encode(const ZP & rhs, const RNS4 & base) { _mul(base); _add(RNS4(rhs)); }
 
 	big_type getS_i() const { return garner4(); }
 };
 
-class RNS5 : public RNS<5>
-{
-public:
-	RNS5() {}
-	explicit RNS5(const uint_32 n) : RNS(n) {}
-	explicit RNS5(const uint_32 * const n) : RNS(n) {}
-
-	RNS5 & operator+=(const RNS5 & rhs) { _add(rhs); return *this; }
-	RNS5 & operator-=(const RNS5 & rhs) { _sub(rhs); return *this; }
-	RNS5 & operator*=(const RNS5 & rhs) { _mul(rhs); return *this; }
-
-	RNS5 operator+(const RNS5 & rhs) const { RNS5 r = *this; r += rhs; return r; }
-	RNS5 operator-(const RNS5 & rhs) const { RNS5 r = *this; r -= rhs; return r; }
-	RNS5 operator*(const RNS5 & rhs) const { RNS5 r = *this; r *= rhs; return r; }
-
-	RNS5 toMonty() const { RNS5 r = *this; r._toMonty(); return r; }
-	static RNS5 norm(const int ln) { RNS5 r; r._norm(ln); return r; }
-
-	void encode(const ZP & rhs, const RNS5 & base) { *this *= base; *this += RNS5(rhs); }
+#define CLASS_RNS(K) \
+class RNS##K : public RNS<K> \
+{ \
+public: \
+	explicit RNS##K(const uint_32 n) : RNS(n) {} \
+ \
+	RNS##K toMonty() const { RNS##K r = *this; r._toMonty(); return r; } \
+	void encode(const ZP & rhs, const RNS##K & base) { _mul(base); _add(RNS##K(rhs)); } \
 };
+
+#define ENCODE_BUF(K) \
+const RNS##K rbase = RNS##K(1u << lbase).toMonty(); \
+for (size_t i = 0; i < n; ++i) \
+{ \
+	size_t j = pck_factor - 1; \
+	RNS##K r = RNS##K(buf[j * n + i]); while (j > 0) {--j; r.encode(buf[j * n + i], rbase); } \
+	for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k); \
+}
+
+CLASS_RNS(3);
+CLASS_RNS(5);
+CLASS_RNS(6);
+CLASS_RNS(7);
 
 template<int LN>
 class transformGPU : public transform
@@ -379,41 +345,15 @@ private:
 		{
 			for (size_t i = 0; i < n; ++i)
 			{
-				size_t j = pck_factor - 1;
-				RNS2 r = RNS2(buf[j * n + i]); // while (j > 0) {--j; r.encode(buf[j * n + i], rbase2); }
+				const RNS2 r = RNS2(buf[0 * n + i]);
 				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
 			}
 		}
-		else if (prm_count == 3)
-		{
-			const RNS3 rbase3 = RNS3(1u << lbase).toMonty();
-			for (size_t i = 0; i < n; ++i)
-			{
-				size_t j = pck_factor - 1;
-				RNS3 r = RNS3(buf[j * n + i]); while (j > 0) {--j; r.encode(buf[j * n + i], rbase3); }
-				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
-			}
-		}
-		else if (prm_count == 4)
-		{
-			const RNS4 rbase4 = RNS4(1u << lbase).toMonty();
-			for (size_t i = 0; i < n; ++i)
-			{
-				size_t j = pck_factor - 1;
-				RNS4 r = RNS4(buf[j * n + i]); while (j > 0) {--j; r.encode(buf[j * n + i], rbase4); }
-				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
-			}
-		}
-		else if (prm_count == 5)
-		{
-			const RNS5 rbase5 = RNS5(1u << lbase).toMonty();
-			for (size_t i = 0; i < n; ++i)
-			{
-				size_t j = pck_factor - 1;
-				RNS5 r = RNS5(buf[j * n + i]); while (j > 0) {--j; r.encode(buf[j * n + i], rbase5); }
-				for (size_t k = 0; k < prm_count; ++k) buf[k * n + i] = r.get_r(k);
-			}
-		}
+		else if (prm_count == 3) { ENCODE_BUF(3); }
+		else if (prm_count == 4) { ENCODE_BUF(4); }
+		else if (prm_count == 5) { ENCODE_BUF(5); }
+		else if (prm_count == 6) { ENCODE_BUF(6); }
+		else if (prm_count == 7) { ENCODE_BUF(7); }
 		else {}	// TODO
 
 		for (size_t k = 0; k < prm_count; ++k) _engine.write_memory(k * Reg_count + reg_y, &buf[k * n]);
@@ -497,7 +437,6 @@ private:
 
 		if (fr != 0)
 		{
-			std::cout << "warning" << std::endl;
 			mpz_t t; mpz_init_set_si(t, fr);
 			mpz_mul_2exp(t, t, mp_bitcnt_t(lbase_pck) << LN);
 			mpz_add(y, y, t);
@@ -737,41 +676,32 @@ public:
 		}
 
 		// Not converted into Montgomery form such that output is converted out of MF
-		const RNS5 norm = RNS5::norm(LN - 1);
-		src << "__constant uint g_norm[" << prm_count << "] = { " << norm.get_r(0) << "u";
-		for (size_t k = 1; k < prm_count; ++k) src << ", " << norm.get_r(k) << "u";
+		src << "#define CNORM\tconst uint c_norm[" << prm_count << "] = { " << Mod::norm(LN - 1, 0) << "u";
+		for (size_t k = 1; k < prm_count; ++k) src << ", " << Mod::norm(LN - 1, k) << "u";
 		src << " };" << std::endl;
 
-		const RNS5 rbase = RNS5(1u << lbase).toMonty();
-		src << "__constant uint g_base[" << prm_count << "] = { " << rbase.get_r(0) << "u";
-		for (size_t k = 1; k < prm_count; ++k) src << ", " << rbase.get_r(k) << "u";
+		const ZP base = 1u << lbase;
+		src << "#define CBASE\tconst uint c_base[" << prm_count << "] = { " << Mod::toMonty(base, 0) << "u";
+		for (size_t k = 1; k < prm_count; ++k) src << ", " << Mod::toMonty(base, k) << "u";
 		src << " };" << std::endl;
 
-		RNS5 rbase_pck = RNS5(1u << lbase); for (size_t l = 1; l < pck_factor; ++l) rbase_pck *= rbase;
-		src << "__constant uint g_base_pck[" << prm_count << "] = { " << rbase_pck.get_r(0) << "u";
-		for (size_t k = 1; k < prm_count; ++k) src << ", " << rbase_pck.get_r(k) << "u";
-		src << " };" << std::endl;
-
-		src << "#define INVP1_P0\t" << Mod::invert(Mod::toMonty(Mod::P[1], 0), 0) << "u" << std::endl;
-
-		// TODO loops
-		if (prm_count >= 3)
+		const ZP rbase_0 = Mod::toMonty(base, 0);
+		ZP rbase_pck_0 = ZP(base); for (size_t l = 1; l < pck_factor; ++l) rbase_pck_0 = Mod::mul(rbase_pck_0, rbase_0, 0);
+		src << "#define CBASE_PCK\tconst uint c_base_pck[" << prm_count << "] = { " << rbase_pck_0 << "u";
+		for (size_t k = 1; k < prm_count; ++k)
 		{
-			src << "#define INVP2_P0\t" << Mod::invert(Mod::toMonty(Mod::P[2], 0), 0) << "u" << std::endl;
-			src << "#define INVP2_P1\t" << Mod::invert(Mod::toMonty(Mod::P[2], 1), 1) << "u" << std::endl;
+			const ZP rbase_k = Mod::toMonty(base, k);
+			ZP rbase_pck_k = ZP(base); for (size_t l = 1; l < pck_factor; ++l) rbase_pck_k = Mod::mul(rbase_pck_k, rbase_k, k);
+			src << ", " << rbase_pck_k << "u";
 		}
-		if (prm_count >= 4)
+		src << " };" << std::endl;
+
+		for (size_t i = 1; i < prm_count; ++i)
 		{
-			src << "#define INVP3_P0\t" << Mod::invert(Mod::toMonty(Mod::P[3], 0), 0) << "u" << std::endl;
-			src << "#define INVP3_P1\t" << Mod::invert(Mod::toMonty(Mod::P[3], 1), 1) << "u" << std::endl;
-			src << "#define INVP3_P2\t" << Mod::invert(Mod::toMonty(Mod::P[3], 2), 2) << "u" << std::endl;
-		}
-		if (prm_count >= 5)
-		{
-			src << "#define INVP4_P0\t" << Mod::invert(Mod::toMonty(Mod::P[4], 0), 0) << "u" << std::endl;
-			src << "#define INVP4_P1\t" << Mod::invert(Mod::toMonty(Mod::P[4], 1), 1) << "u" << std::endl;
-			src << "#define INVP4_P2\t" << Mod::invert(Mod::toMonty(Mod::P[4], 2), 2) << "u" << std::endl;
-			src << "#define INVP4_P3\t" << Mod::invert(Mod::toMonty(Mod::P[4], 3), 3) << "u" << std::endl;
+			for (size_t j = 0; j < i; ++j)
+			{
+				src << "#define INVP" << i << "_P" << j << "\t" << Mod::invert(Mod::toMonty(Mod::P[i], j), j) << "u" << std::endl;
+			}
 		}
 
 		src << "#define CARRY_LENGTH\t" << CARRY_LENGTH << "u"  << std::endl;
@@ -912,7 +842,9 @@ inline transform * create_transformGPU(const mpz_t & N, const int32_t a, const s
 	std::cout << "K_min = " << K_min << ", K*n*ln = " << c_min << ", " << c_min / double(c_2) << std::endl;
 
 	const size_t prm_count = K_min, pck_factor = get_s(prm_count);
-	// const size_t prm_count = 5, pck_factor = get_s(prm_count);
+	// static size_t prm_count_check = 2;
+	// const size_t prm_count = prm_count_check, pck_factor = get_s(prm_count);
+	// ++prm_count_check; if (prm_count_check > 5) prm_count_check = 2;
 
 	log2_p_2a = std::log2(double(Mod::P[0])) - std::log2(2.0 * a); for (size_t k = 1; k < prm_count; ++k) log2_p_2a += std::log2(double(Mod::P[k]));
 	int ln = 0, lbase = 0; get_n_base(ln, lbase, pck_factor, log2_16aN, log2_p_2a);

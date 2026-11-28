@@ -63,9 +63,9 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define P13				2281701377u
 #define Q13				2013265921u
 #define RSQ13			773725730u
-__constant uint g_norm[4] = { 3670016001u, 3567255553u, 3449815041u, 3405774849u };
-__constant uint g_base[4] = { 3174786139u, 3997810352u, 1461973742u, 212897086u };
-__constant uint g_base_pck[4] = { 3018288268u, 499726294u, 1168408158u, 999690664u };
+#define CNORM			const uint c_norm[4] = { 3670016001u, 3567255553u, 3449815041u, 3405774849u };
+#define CBASE			const uint c_base[4] = { 3174786139u, 3997810352u, 1461973742u, 212897086u };
+#define CBASE_PCK		const uint c_base_pck[4] = { 3018288268u, 499726294u, 1168408158u, 999690664u };
 #define INVP1_P0		1797558821u
 #define INVP2_P0		3075822917u
 #define INVP2_P1		4076863457u
@@ -171,9 +171,9 @@ INLINE RNS_K mulmodK(const RNS_K lhs, const RNS_K rhs)
 	RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = mulmod(lhs.r[k], rhs.r[k], g_pq[k]); return r;
 }
 
-INLINE RNS_K NORM_K() { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = g_norm[k]; return r; }
-INLINE RNS_K RBASE_K() { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = g_base[k]; return r; }
-INLINE RNS_K RBASE_PCK_K() { RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = g_base_pck[k]; return r; }
+INLINE RNS_K NORM_K() { CNORM; RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = c_norm[k]; return r; }
+INLINE RNS_K RBASE_K() { CBASE; RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = c_base[k]; return r; }
+INLINE RNS_K RBASE_PCK_K() { CBASE_PCK; RNS_K r; for (sz_t k = 0; k < PRM_COUNT; ++k) r.r[k] = c_base_pck[k]; return r; }
 
 typedef struct { uint_32 r[PCK_FACTOR]; } pck_type;
 

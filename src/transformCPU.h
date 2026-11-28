@@ -52,18 +52,12 @@ inline uint_64 _subcc(const uint_64 a, const uint_64 b, bool * const carry)
 
 typedef struct { uint_32 r[PCK_FACTOR]; } pck_type;
 
-#if (PRM_COUNT == 4)
-
-// 128-bit
-#define BIG_LSIZE	1
-#define HTYPE		int_64
-
-#elif (PRM_COUNT == 5)
-
-// 160-bit
-#define BIG_LSIZE	2
+// size = PRM_COUNT * 32 > LN + 2 * LBASE
+#define BIG_LSIZE	((PRM_COUNT - 1) / 2)
+#if (PRM_COUNT % 2 == 1)
 #define HTYPE		int_32
-
+#else
+#define HTYPE		int_64
 #endif
 
 // typedef signed _BitInt(160) big_check;
@@ -196,10 +190,11 @@ inline big_type _big_mul_u64i64(const uint_64 x, const int_64 y)
 
 	big_type r;
 	r.l[0] = (uint_64)(s01 << 32) | (uint_32)(s00);
-#if (PRM_COUNT == 4)
+#if (BIG_LSIZE == 1)
 	r.h = s11;
-#elif (PRM_COUNT == 5)
+#else
 	r.l[1] = (uint_64)(s11);
+	for (size_t i = 2; i < BIG_LSIZE; ++i) r.l[i] = (s11 < 0) ? (uint_64)(-1) : 0;
 	r.h = (s11 < 0) ? (HTYPE)(-1) : 0;
 #endif
 	return r;
